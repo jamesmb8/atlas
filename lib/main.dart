@@ -1,20 +1,9 @@
 import 'package:flutter/material.dart';
+import 'app/atlas_app.dart';
+import 'package:firebase_core/firebase_core.dart';
 
-
-
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   runApp(const AtlasApp());
-}
-
-class AtlasApp extends StatelessWidget {
-  const AtlasApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'atlas',
-      home: SizedBox.shrink(),
-    );
-  }
 }
