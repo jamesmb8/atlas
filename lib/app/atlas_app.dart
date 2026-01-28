@@ -6,17 +6,10 @@ class AtlasApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-
+    return const MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'atlas',
-      theme: ThemeData(
-        textSelectionTheme: const TextSelectionThemeData(
-          cursorColor: Color(0xFF9FC8B2), // Atlas sage green
-          selectionHandleColor: Color(0xFF9FC8B2),
-        ),
-      ),
-      home: const SignUpNameScreen(),
+      home: SignUpNameScreen(),
     );
   }
 }

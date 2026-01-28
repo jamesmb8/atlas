@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'signupemailscreen.dart';
+
 class SignUpNameScreen extends StatefulWidget {
   const SignUpNameScreen({super.key});
 
@@ -37,22 +38,12 @@ class _SignUpNameScreenState extends State<SignUpNameScreen> {
     final firstName = _firstNameController.text.trim();
     final surname = _surnameController.text.trim();
 
-    void _onContinue() {
-      if (!_isValid) return;
-
-      final firstName = _firstNameController.text.trim();
-      final surname = _surnameController.text.trim();
-
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SignUpEmailScreen(firstName: firstName, surname: surname),
-        ),
-      );
-    }
-
-
-    debugPrint('First name: $firstName, Surname: $surname');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SignUpEmailScreen(firstName: firstName, surname: surname),
+      ),
+    );
   }
 
   @override
@@ -71,7 +62,6 @@ class _SignUpNameScreenState extends State<SignUpNameScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Top row: back + progress
               Row(
                 children: [
                   IconButton(
@@ -93,13 +83,12 @@ class _SignUpNameScreenState extends State<SignUpNameScreen> {
                 ],
               ),
               const SizedBox(height: 24),
-
               const Text(
                 "What’s your name?",
                 style: TextStyle(
                   fontSize: 28,
                   height: 1.15,
-                  fontWeight: FontWeight.w400, // LINE Seed JP Regular vibe
+                  fontWeight: FontWeight.w400,
                   color: primaryText,
                 ),
               ),
@@ -114,7 +103,6 @@ class _SignUpNameScreenState extends State<SignUpNameScreen> {
                 ),
               ),
               const SizedBox(height: 28),
-
               _AtlasTextField(
                 controller: _firstNameController,
                 label: "First name",
@@ -137,9 +125,7 @@ class _SignUpNameScreenState extends State<SignUpNameScreen> {
                 textInputAction: TextInputAction.done,
                 onSubmitted: (_) => _onContinue(),
               ),
-
               const Spacer(),
-
               SizedBox(
                 width: double.infinity,
                 height: 54,
@@ -156,18 +142,15 @@ class _SignUpNameScreenState extends State<SignUpNameScreen> {
                   ),
                   child: const Text(
                     "Continue",
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w400,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w400),
                   ),
                 ),
               ),
               const SizedBox(height: 10),
-              Center(
+              const Center(
                 child: Text(
                   "You can change this later.",
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
                     height: 1.2,
                     fontWeight: FontWeight.w400,
@@ -267,31 +250,20 @@ class _AtlasTextField extends StatelessWidget {
       children: [
         Text(
           label,
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w400,
-            color: secondaryText,
-          ),
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w400, color: secondaryText),
         ),
         const SizedBox(height: 8),
         TextField(
           controller: controller,
           textInputAction: textInputAction,
           onSubmitted: onSubmitted,
-          style: TextStyle(
-            color: textColor,
-            fontSize: 16,
-            fontWeight: FontWeight.w400,
-          ),
+          style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.w400),
           decoration: InputDecoration(
             hintText: hintText,
             hintStyle: TextStyle(color: secondaryText.withOpacity(0.7)),
             filled: true,
             fillColor: Colors.white.withOpacity(0.45),
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 16,
-            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
               borderSide: BorderSide(color: border),
