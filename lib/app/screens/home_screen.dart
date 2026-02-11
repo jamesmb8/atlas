@@ -3,9 +3,10 @@ import 'dart:async';
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import 'package:atlas/app/screens/route_options_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
+import '../../features/routes/directions.dart';
 import '../../features/search/place_search.dart';
-
 
 
 class AtlasPalette {
@@ -26,17 +27,48 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   AppleMapController? _mapController;
 
-  // MVP: selected destination (later we’ll use MapKit autocomplete + real place model)
   String? _selectedPlaceName;
   LatLng? _selectedPlaceLatLng;
 
-  final Set<Annotation> _annotations = {};
+  LatLng? _userLatLng;
+  bool _locLoading = true;
+
+  final Set<Annotation> _annotations = {}; // we’ll keep empty if you dislike pins
   final Set<Polyline> _polylines = {};
 
-  static const _initialCamera = CameraPosition(
-    target: LatLng(53.3811, -1.4701), // Sheffield-ish fallback
+  static const _fallbackCamera = CameraPosition(
+    target: LatLng(53.3811, -1.4701), // Sheffield fallback
     zoom: 12,
   );
+
+  @override
+  void initState() {
+    super.initState();
+    // Don't call _loadUserLocation() here because _mapController isn't ready yet.
+    // We'll call it inside onMapCreated.
+  }
+
+  Future<void> _loadUserLocation() async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.best,
+      );
+      _userLatLng = LatLng(pos.latitude, pos.longitude);
+
+      final ctrl = _mapController;
+      if (ctrl != null) {
+        await ctrl.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(target: _userLatLng!, zoom: 14),
+          ),
+        );
+      }
+    } catch (_) {
+      // leave fallback
+    } finally {
+      if (mounted) setState(() => _locLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -44,26 +76,20 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: AtlasPalette.background,
       body: Stack(
         children: [
-          // Map layer
           AppleMap(
-            initialCameraPosition: _initialCamera,
+            initialCameraPosition: _fallbackCamera,
             myLocationEnabled: true,
             myLocationButtonEnabled: false,
             compassEnabled: false,
             mapType: MapType.standard,
             annotations: _annotations,
             polylines: _polylines,
-            onMapCreated: (c) => _mapController = c,
-            onTap: (latLng) {
-              // Optional: tap to pick a point quickly (MVP)
-              _setDestination(
-                name: "Pinned location",
-                latLng: latLng,
-              );
+            onMapCreated: (c) {
+              _mapController = c;
+              _loadUserLocation();
             },
           ),
 
-          // Top “Where to?” search pill
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
@@ -74,35 +100,37 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // Floating location button (bottom-right)
           Positioned(
             right: 16,
             bottom: 210,
             child: _RoundIconButton(
               icon: Icons.my_location,
-              onPressed: _recenter,
+              onPressed: _recenterToUser,
             ),
           ),
 
-          // Bottom pull-up sheet
           _HomeBottomSheet(
             selectedPlaceName: _selectedPlaceName,
             onFindPlace: _openPlacePicker,
-            onGo: (_selectedPlaceLatLng != null)
-                ? () => _goToOptions(context)
-                : null,
+            onGo: (_selectedPlaceLatLng != null) ? () => _goToOptions(context) : null,
           ),
         ],
       ),
     );
   }
 
-  Future<void> _recenter() async {
-    // If you want true recenter to user location later, we’ll wire geolocator.
-    // For now, just animate to initial region.
+  Future<void> _recenterToUser() async {
     final ctrl = _mapController;
+    final user = _userLatLng;
     if (ctrl == null) return;
-    await ctrl.animateCamera(CameraUpdate.newCameraPosition(_initialCamera));
+
+    if (user != null) {
+      await ctrl.animateCamera(
+        CameraUpdate.newCameraPosition(CameraPosition(target: user, zoom: 14)),
+      );
+    } else {
+      await ctrl.animateCamera(CameraUpdate.newCameraPosition(_fallbackCamera));
+    }
   }
 
   Future<void> _openPlacePicker() async {
@@ -112,66 +140,76 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     if (result == null) return;
-    _setDestination(name: result.title, latLng: result.latLng);
+    await _setDestination(name: result.title, latLng: result.latLng);
   }
 
-
-  void _setDestination({required String name, required LatLng latLng}) {
+  /// Sets destination, then draws a *real road-following polyline* using MKDirections.
+  Future<void> _setDestination({required String name, required LatLng latLng}) async {
     setState(() {
       _selectedPlaceName = name;
       _selectedPlaceLatLng = latLng;
 
-      _annotations
-        ..clear()
-        ..add(
-          Annotation(
-            annotationId: AnnotationId('dest'),
-            position: latLng,
-            infoWindow: InfoWindow(title: name),
-          ),
-        );
+      // Remove pin if you dislike it:
+      _annotations.clear();
 
-      // MVP polyline: simple straight line (placeholder).
-      // Later: MKDirections route polyline.
+      _polylines.clear();
+    });
+
+    final origin = _userLatLng;
+
+    // If we don’t have user location yet, just zoom to the destination.
+    if (origin == null) {
+      await _mapController?.animateCamera(
+        CameraUpdate.newCameraPosition(CameraPosition(target: latLng, zoom: 14)),
+      );
+      return;
+    }
+
+    // Get route points from MapKit
+    final points = await MapKitDirections.route(
+      origin: origin,
+      destination: latLng,
+      transport: 'walking', // change to 'automobile' if you want driving by default
+    );
+
+    if (!mounted) return;
+
+    final routePoints = points.isNotEmpty ? points : [origin, latLng];
+
+    setState(() {
       _polylines
         ..clear()
         ..add(
           Polyline(
-            polylineId: PolylineId('mvp_line'),
-            points: [
-              _initialCamera.target, // placeholder “origin”
-              latLng,
-            ],
-            width: 4,
+            polylineId: PolylineId('route'),
+            points: routePoints,
+            width: 6,
           ),
         );
     });
 
-    // Zoom to fit both points (simple heuristic)
-    unawaited(_zoomToRoutePreview(latLng));
+    await _zoomToPolyline(routePoints);
   }
 
-  Future<void> _zoomToRoutePreview(LatLng dest) async {
+  Future<void> _zoomToPolyline(List<LatLng> pts) async {
     final ctrl = _mapController;
-    if (ctrl == null) return;
+    if (ctrl == null || pts.isEmpty) return;
 
-    final swLat = (dest.latitude < _initialCamera.target.latitude)
-        ? dest.latitude
-        : _initialCamera.target.latitude;
-    final swLng = (dest.longitude < _initialCamera.target.longitude)
-        ? dest.longitude
-        : _initialCamera.target.longitude;
+    double minLat = pts.first.latitude;
+    double maxLat = pts.first.latitude;
+    double minLng = pts.first.longitude;
+    double maxLng = pts.first.longitude;
 
-    final neLat = (dest.latitude > _initialCamera.target.latitude)
-        ? dest.latitude
-        : _initialCamera.target.latitude;
-    final neLng = (dest.longitude > _initialCamera.target.longitude)
-        ? dest.longitude
-        : _initialCamera.target.longitude;
+    for (final p in pts) {
+      if (p.latitude < minLat) minLat = p.latitude;
+      if (p.latitude > maxLat) maxLat = p.latitude;
+      if (p.longitude < minLng) minLng = p.longitude;
+      if (p.longitude > maxLng) maxLng = p.longitude;
+    }
 
     final bounds = LatLngBounds(
-      southwest: LatLng(swLat, swLng),
-      northeast: LatLng(neLat, neLng),
+      southwest: LatLng(minLat, minLng),
+      northeast: LatLng(maxLat, maxLng),
     );
 
     await ctrl.animateCamera(CameraUpdate.newLatLngBounds(bounds, 70));
@@ -263,16 +301,15 @@ class _RoundIconButton extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: onPressed,
-        child: const SizedBox(
+        child: SizedBox(
           width: 52,
           height: 52,
-          child: Icon(Icons.my_location, color: AtlasPalette.primaryText),
+          child: Icon(icon, color: AtlasPalette.primaryText),
         ),
       ),
     );
   }
 }
-
 class _HomeBottomSheet extends StatelessWidget {
   final String? selectedPlaceName;
   final VoidCallback onFindPlace;
@@ -322,9 +359,7 @@ class _HomeBottomSheet extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        selectedPlaceName == null
-                            ? "Plan a journey"
-                            : "Destination",
+                        selectedPlaceName == null ? "Plan a journey" : "Destination",
                         style: const TextStyle(
                           fontSize: 20,
                           height: 1.1,
@@ -361,9 +396,7 @@ class _HomeBottomSheet extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _PrimaryButton(
-                        label: selectedPlaceName == null
-                            ? "Find a place"
-                            : "Change destination",
+                        label: selectedPlaceName == null ? "Find a place" : "Change destination",
                         onPressed: onFindPlace,
                       ),
                     ),
@@ -500,138 +533,5 @@ class _RecentRow extends StatelessWidget {
   }
 }
 
-class _PlacePickResult {
-  final String name;
-  final LatLng latLng;
-  const _PlacePickResult(this.name, this.latLng);
-}
-
-class _PlacePickerSheet extends StatelessWidget {
-  const _PlacePickerSheet();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      decoration: const BoxDecoration(
-        color: AtlasPalette.background,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 42,
-              height: 5,
-              decoration: BoxDecoration(
-                color: AtlasPalette.divider,
-                borderRadius: BorderRadius.circular(999),
-              ),
-            ),
-            const SizedBox(height: 14),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                "Pick a place (MVP)",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w400,
-                  color: AtlasPalette.primaryText,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-
-            _PickTile(
-              title: "Sheffield Station",
-              subtitle: "Rail station",
-              onTap: () => Navigator.pop(
-                context,
-                const _PlacePickResult("Sheffield Station", LatLng(53.3771, -1.4632)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            _PickTile(
-              title: "Meadowhall",
-              subtitle: "Shopping centre",
-              onTap: () => Navigator.pop(
-                context,
-                const _PlacePickResult("Meadowhall", LatLng(53.4155, -1.4125)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            _PickTile(
-              title: "Peak District",
-              subtitle: "National park",
-              onTap: () => Navigator.pop(
-                context,
-                const _PlacePickResult("Peak District", LatLng(53.3400, -1.7600)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PickTile extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final VoidCallback onTap;
-
-  const _PickTile({
-    required this.title,
-    required this.subtitle,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.45),
-          border: Border.all(color: AtlasPalette.divider),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.search, color: AtlasPalette.secondaryText),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w400,
-                      color: AtlasPalette.primaryText,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w400,
-                      color: AtlasPalette.secondaryText,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.north_west, color: AtlasPalette.secondaryText),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// Keep your existing _HomeBottomSheet / _PrimaryButton / _RecentRow
+// (You can paste them as-is below this point)
