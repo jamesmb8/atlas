@@ -1,3 +1,4 @@
+import 'package:atlas/app/screens/landing_screen.dart';
 import 'package:flutter/material.dart';
 import '../features/auth/screens/signupnamescreen.dart';
 
@@ -9,7 +10,7 @@ class AtlasApp extends StatelessWidget {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'atlas',
-      home: SignUpNameScreen(),
+      home: LandingScreen(),
     );
   }
 }
