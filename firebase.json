@@ -1,1 +1,56 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"atlas-c83be","appId":"1:174184332140:android:03da4ca020a2ac67bc5149","fileOutput":"android/app/google-services.json"}},"ios":{"default":{"projectId":"atlas-c83be","appId":"1:174184332140:ios:0cdef9b1d62ada73bc5149","uploadDebugSymbols":false,"fileOutput":"ios/Runner/GoogleService-Info.plist"}},"macos":{"default":{"projectId":"atlas-c83be","appId":"1:174184332140:ios:37e25acfb429a100bc5149","uploadDebugSymbols":false,"fileOutput":"macos/Runner/GoogleService-Info.plist"}},"dart":{"lib/firebase_options.dart":{"projectId":"atlas-c83be","configurations":{"android":"1:174184332140:android:03da4ca020a2ac67bc5149","ios":"1:174184332140:ios:0cdef9b1d62ada73bc5149","macos":"1:174184332140:ios:37e25acfb429a100bc5149","web":"1:174184332140:web:9cee3639ded871c2bc5149","windows":"1:174184332140:web:b2f45099711d4dafbc5149"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "atlas-c83be",
+          "appId": "1:174184332140:android:03da4ca020a2ac67bc5149",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "ios": {
+        "default": {
+          "projectId": "atlas-c83be",
+          "appId": "1:174184332140:ios:0cdef9b1d62ada73bc5149",
+          "uploadDebugSymbols": false,
+          "fileOutput": "ios/Runner/GoogleService-Info.plist"
+        }
+      },
+      "macos": {
+        "default": {
+          "projectId": "atlas-c83be",
+          "appId": "1:174184332140:ios:37e25acfb429a100bc5149",
+          "uploadDebugSymbols": false,
+          "fileOutput": "macos/Runner/GoogleService-Info.plist"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "atlas-c83be",
+          "configurations": {
+            "android": "1:174184332140:android:03da4ca020a2ac67bc5149",
+            "ios": "1:174184332140:ios:0cdef9b1d62ada73bc5149",
+            "macos": "1:174184332140:ios:37e25acfb429a100bc5149",
+            "web": "1:174184332140:web:9cee3639ded871c2bc5149",
+            "windows": "1:174184332140:web:b2f45099711d4dafbc5149"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ],
+      "predeploy": []
+
+    }
+  ]
+}

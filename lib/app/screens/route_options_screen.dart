@@ -1,7 +1,8 @@
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
-class RouteOptionsScreen extends StatelessWidget {
+class RouteOptionsScreen extends StatefulWidget {
   final String destinationName;
   final LatLng destination;
 
@@ -10,6 +11,48 @@ class RouteOptionsScreen extends StatelessWidget {
     required this.destinationName,
     required this.destination,
   });
+
+  @override
+  State<RouteOptionsScreen> createState() => _RouteOptionsScreenState();
+}
+
+class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
+  bool _loading = true;
+  dynamic _transportData;
+
+  @override
+  void initState() {
+    super.initState();
+    _testTransportApi();
+  }
+
+  Future<void> _testTransportApi() async {
+    try {
+      final callable = FirebaseFunctions.instanceFor(region: 'us-central1')
+          .httpsCallable('planJourney');
+
+      final result = await callable.call({
+        'fromLat': 53.5228,
+        'fromLng': -1.1285,
+        'toLat': 53.3811,
+        'toLng': -1.4701,
+      });
+
+
+      if (!mounted) return;
+
+      setState(() {
+        _transportData = result.data;
+        _loading = false;
+      });
+
+      debugPrint('TransportAPI response: ${result.data}');
+    } catch (e) {
+      debugPrint('TransportAPI error: $e');
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,7 +69,7 @@ class RouteOptionsScreen extends StatelessWidget {
         surfaceTintColor: bg,
         iconTheme: const IconThemeData(color: primaryText),
         title: Text(
-          destinationName,
+          widget.destinationName,
           style: const TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w400,
@@ -53,7 +96,7 @@ class RouteOptionsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              "LatLng: ${destination.latitude.toStringAsFixed(5)}, ${destination.longitude.toStringAsFixed(5)}",
+              "LatLng: ${widget.destination.latitude.toStringAsFixed(5)}, ${widget.destination.longitude.toStringAsFixed(5)}",
               style: const TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w400,
@@ -62,66 +105,26 @@ class RouteOptionsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 18),
 
-            // Placeholder cards
-            _OptionCard(title: "Walking", subtitle: "— min • — kg CO₂"),
-            const SizedBox(height: 12),
-            _OptionCard(title: "Driving", subtitle: "— min • — kg CO₂"),
-            const SizedBox(height: 12),
-            _OptionCard(title: "Public transport", subtitle: "— min • — kg CO₂"),
+            if (_loading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.only(top: 40),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (_transportData != null)
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Text(
+                    _transportData.toString(),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              )
+            else
+              const Text("No data returned."),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _OptionCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-
-  const _OptionCard({required this.title, required this.subtitle});
-
-  @override
-  Widget build(BuildContext context) {
-    const primaryText = Color(0xFF1F1F1F);
-    const secondaryText = Color(0xFF6B6E6A);
-    const border = Color(0xFFE3E4DE);
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.45),
-        border: Border.all(color: border),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w400,
-                    color: primaryText,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w400,
-                    color: secondaryText,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Icon(Icons.chevron_right, color: secondaryText),
-        ],
       ),
     );
   }
