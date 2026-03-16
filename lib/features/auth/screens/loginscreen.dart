@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../../../app/screens/home_screen.dart';
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -51,12 +53,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Logged in ✅')),
-      );
 
-      // TODO: Replace with your home/map screen route.
-      // Navigator.pushReplacementNamed(context, '/home');
+
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+            (route) => false,
+      );
 
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;

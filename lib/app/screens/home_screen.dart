@@ -144,51 +144,71 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Sets destination, then draws a *real road-following polyline* using MKDirections.
-  Future<void> _setDestination({required String name, required LatLng latLng}) async {
+  Future<void> _setDestination({
+    required String name,
+    required LatLng latLng,
+  }) async {
     setState(() {
       _selectedPlaceName = name;
       _selectedPlaceLatLng = latLng;
 
-      // Remove pin if you dislike it:
-      _annotations.clear();
+      _annotations
+        ..clear()
+        ..add(
+          Annotation(
+            annotationId: AnnotationId('destination'),
+            position: latLng,
+            infoWindow: InfoWindow(title: name),
+          ),
+        );
 
       _polylines.clear();
     });
 
-    final origin = _userLatLng;
-
-    // If we don’t have user location yet, just zoom to the destination.
-    if (origin == null) {
-      await _mapController?.animateCamera(
-        CameraUpdate.newCameraPosition(CameraPosition(target: latLng, zoom: 14)),
-      );
-      return;
-    }
-
-    // Get route points from MapKit
-    final points = await MapKitDirections.route(
-      origin: origin,
-      destination: latLng,
-      transport: 'walking', // change to 'automobile' if you want driving by default
+    // First: always move camera to the chosen destination
+    await _mapController?.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(target: latLng, zoom: 14),
+      ),
     );
 
-    if (!mounted) return;
+    final origin = _userLatLng;
+    if (origin == null) return;
 
-    final routePoints = points.isNotEmpty ? points : [origin, latLng];
+    try {
+      final points = await MapKitDirections.route(
+        origin: origin,
+        destination: latLng,
+        transport: 'walking',
+      );
 
-    setState(() {
-      _polylines
-        ..clear()
-        ..add(
-          Polyline(
-            polylineId: PolylineId('route'),
-            points: routePoints,
-            width: 6,
-          ),
-        );
-    });
+      if (!mounted) return;
 
-    await _zoomToPolyline(routePoints);
+      final routePoints = points.isNotEmpty ? points : [origin, latLng];
+
+      setState(() {
+        _polylines
+          ..clear()
+          ..add(
+            Polyline(
+              polylineId: PolylineId('route'),
+              points: routePoints,
+              width: 6,
+            ),
+          );
+      });
+
+      await _zoomToPolyline(routePoints);
+    } catch (e) {
+      debugPrint('Route generation failed: $e');
+
+      // Fallback: keep the map on the selected destination
+      await _mapController?.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(target: latLng, zoom: 14),
+        ),
+      );
+    }
   }
 
   Future<void> _zoomToPolyline(List<LatLng> pts) async {
@@ -225,6 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => RouteOptionsScreen(
           destinationName: name,
           destination: dest,
+          origin: _userLatLng,
         ),
       ),
     );

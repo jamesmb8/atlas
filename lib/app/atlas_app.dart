@@ -12,8 +12,8 @@ class AtlasApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'atlas',
-      home: RouteOptionsScreen(destinationName: "Sheffield Station", destination: LatLng(53.3771, -1.4632)),
+      title: 'Atlas',
+      home: LandingScreen(),
     );
   }
 }

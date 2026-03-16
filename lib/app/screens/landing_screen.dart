@@ -5,6 +5,8 @@ import 'dart:ui';
 import 'package:atlas/features/auth/screens/signupnamescreen.dart';
 import 'package:flutter/material.dart';
 
+import '../../features/auth/screens/loginscreen.dart';
+
 void main() => runApp(const AtlasApp());
 
 @immutable
@@ -157,7 +159,27 @@ class _LandingScreenState extends State<LandingScreen>
                               onPressed: _onSignUp,
                             ),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'Already have an account? ',
+                                style: tt.bodyMedium,
+                              ),
+                              GestureDetector(
+                                onTap: _onLogIn,
+                                child: Text(
+                                  'Log in',
+                                  style: tt.bodyMedium?.copyWith(
+                                    color: AtlasPalette.primaryText,
+                                    fontWeight: FontWeight.w400,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
                           Text('One tap. No noise.', style: tt.bodyMedium),
                         ],
                       ),
@@ -177,6 +199,11 @@ class _LandingScreenState extends State<LandingScreen>
       _pointer = p;
       _hasPointer = active;
     });
+  }
+  void _onLogIn() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+    );
   }
 
   void _onSignUp() {
