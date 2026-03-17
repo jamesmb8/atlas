@@ -9,6 +9,7 @@ class RouteOptionsService {
   final TransitRouteService _transitRouteService;
   final Co2Service _co2Service;
 
+
   const RouteOptionsService({
     AppleRouteService appleRouteService = const AppleRouteService(),
     TransitRouteService transitRouteService = const TransitRouteService(),
@@ -29,6 +30,7 @@ class RouteOptionsService {
       origin: origin,
       destination: destination,
     );
+    print('walking route result: $walking');
 
     if (walking != null) {
       options.add(
@@ -49,6 +51,7 @@ class RouteOptionsService {
       origin: origin,
       destination: destination,
     );
+    print('driving route result: $driving');
 
     if (driving != null) {
       options.add(

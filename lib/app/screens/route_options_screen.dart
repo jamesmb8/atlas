@@ -1,3 +1,4 @@
+// lib/screens/routes/route_options_screen.dart
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -101,41 +102,44 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
           child: Divider(height: 1, color: border),
         ),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-              children: [
-                const Text(
-                  'Journey options',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w400,
-                    color: primaryText,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${widget.destination.latitude.toStringAsFixed(5)}, ${widget.destination.longitude.toStringAsFixed(5)}',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w400,
-                    color: secondaryText,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                if (_loading)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 40),
-                    child: Center(child: CircularProgressIndicator()),
-                  )
-                else if (_error != null)
-                  Text(
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                  ? Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
                     _error!,
                     style: const TextStyle(color: Colors.red),
-                  )
-                else if (_options.isEmpty)
+                  ),
+                ),
+              )
+                  : ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                children: [
+                  const Text(
+                    'Journey options',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w400,
+                      color: primaryText,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${widget.destination.latitude.toStringAsFixed(5)}, ${widget.destination.longitude.toStringAsFixed(5)}',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w400,
+                      color: secondaryText,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  if (_options.isEmpty)
                     const Text(
                       'No route options available yet.',
                       style: TextStyle(
@@ -150,38 +154,39 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
                         child: _RouteOptionCard(option: option),
                       ),
                     ),
-              ],
+                ],
+              ),
             ),
-          ),
-          SafeArea(
-            top: false,
-            child: Padding(
+            Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SizedBox(
-                width: double.infinity,
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: _openInAppleMaps,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: accent,
-                    foregroundColor: primaryText,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
+              child: SafeArea(
+                top: false,
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    onPressed: _openInAppleMaps,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: accent,
+                      foregroundColor: primaryText,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
                     ),
-                  ),
-                  child: const Text(
-                    'Open in Apple Maps',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w400,
+                    child: const Text(
+                      'Open in Apple Maps',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w400,
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -209,6 +214,7 @@ class _RouteOptionCard extends StatelessWidget {
     final km = meters / 1000;
     return '${km.toStringAsFixed(1)} km';
   }
+
   @override
   Widget build(BuildContext context) {
     const primaryText = Color(0xFF1F1F1F);
@@ -260,18 +266,27 @@ class _RouteOptionCard extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             children: [
-              _Metric(label: 'Time', value: '${option.durationMinutes} min'),
-              _Metric(
-                label: 'Cost',
-                value: option.estimatedCost == null
-                    ? '—'
-                    : '£${option.estimatedCost!.toStringAsFixed(2)}',
+              Expanded(
+                child: Metric(label: 'Time', value: '${option.durationMinutes} min'),
               ),
-              _Metric(label: 'CO₂', value: '${option.co2Kg.toStringAsFixed(2)} kg'),
+              Expanded(
+                child: Metric(
+                  label: 'Cost',
+                  value: option.estimatedCost == null
+                      ? '—'
+                      : '£${option.estimatedCost!.toStringAsFixed(2)}',
+                ),
+              ),
+              Expanded(
+                child: Metric(
+                  label: 'CO₂',
+                  value: '${option.co2Kg.toStringAsFixed(2)} kg',
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
-          _Metric(label: 'Distance', value: _formatDistance(option.distanceMeters)),
+          Metric(label: 'Distance', value: _formatDistance(option.distanceMeters)),
           const SizedBox(height: 12),
           Text(
             option.description,
@@ -297,11 +312,12 @@ class _RouteOptionCard extends StatelessWidget {
   }
 }
 
-class _Metric extends StatelessWidget {
+class Metric extends StatelessWidget {
   final String label;
   final String value;
 
-  const _Metric({
+  const Metric({
+    super.key,
     required this.label,
     required this.value,
   });
@@ -311,29 +327,27 @@ class _Metric extends StatelessWidget {
     const primaryText = Color(0xFF1F1F1F);
     const secondaryText = Color(0xFF6B6E6A);
 
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w400,
-              color: secondaryText,
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w400,
+            color: secondaryText,
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 15,
-              fontWeight: FontWeight.w400,
-              color: primaryText,
-            ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w400,
+            color: primaryText,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

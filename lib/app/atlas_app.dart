@@ -3,6 +3,7 @@ import 'package:atlas/app/screens/home_screen.dart';
 import 'package:atlas/app/screens/landing_screen.dart';
 import 'package:atlas/app/screens/route_options_screen.dart';
 import 'package:flutter/material.dart';
+import '../features/auth/screens/appleroutetestscreen.dart';
 import '../features/auth/screens/signupnamescreen.dart';
 
 class AtlasApp extends StatelessWidget {
@@ -13,7 +14,11 @@ class AtlasApp extends StatelessWidget {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Atlas',
-      home: LandingScreen(),
+      home: RouteOptionsScreen(
+        destinationName: 'Sheffield Station',
+        origin: LatLng(53.3811, -1.4701),
+        destination: LatLng(53.3780, -1.4620),
+      ),
     );
   }
 }
