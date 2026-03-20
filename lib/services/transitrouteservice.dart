@@ -1,3 +1,6 @@
+// lib/services/transitrouteservice.dart
+import 'dart:math' as math;
+
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import '../features/transport/transport_api.dart';
 
@@ -6,13 +9,18 @@ const _transportApiAppKey = String.fromEnvironment('TRANSPORT_API_APP_KEY');
 
 class NearbyTrainInfo {
   final String stationName;
-  final double distanceMeters;
+  final double distanceMeters; // distance from queried point -> station
   final String? stationCode;
   final String ticketUrl;
+  final LatLng stationLatLng;
+  final bool hasCoordinates;
+
 
   const NearbyTrainInfo({
     required this.stationName,
     required this.distanceMeters,
+    required this.stationLatLng,
+    required this.hasCoordinates,
     this.stationCode,
     required this.ticketUrl,
   });
@@ -34,16 +42,50 @@ class NearbyBusInfo {
   double get distanceMiles => distanceMeters / 1609.344;
 }
 
+class TrainBetweenResult {
+  final NearbyTrainInfo? fromOrigin;
+  final NearbyTrainInfo? toDestination;
+
+  const TrainBetweenResult({
+    required this.fromOrigin,
+    required this.toDestination,
+  });
+
+  bool get hasBoth => fromOrigin != null && toDestination != null;
+
+  double? get stationsDistanceMeters {
+    final a = fromOrigin?.stationLatLng;
+    final b = toDestination?.stationLatLng;
+    if (a == null || b == null) return null;
+    return _haversineMeters(a, b);
+  }
+
+  static double _haversineMeters(LatLng a, LatLng b) {
+    const r = 6371000.0;
+    final dLat = _degToRad(b.latitude - a.latitude);
+    final dLon = _degToRad(b.longitude - a.longitude);
+    final lat1 = _degToRad(a.latitude);
+    final lat2 = _degToRad(b.latitude);
+
+    final h = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1) * math.cos(lat2) * math.sin(dLon / 2) * math.sin(dLon / 2);
+    final c = 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h));
+    return r * c;
+  }
+
+  static double _degToRad(double d) => d * (math.pi / 180.0);
+}
+
 class PublicTransportResult {
-  final NearbyTrainInfo? train;
+  final TrainBetweenResult trainBetween;
   final NearbyBusInfo? bus;
 
   const PublicTransportResult({
-    required this.train,
+    required this.trainBetween,
     required this.bus,
   });
 
-  bool get hasAnyData => train != null || bus != null;
+  bool get hasAnyData => trainBetween.fromOrigin != null || trainBetween.toDestination != null || bus != null;
 }
 
 class TransitRouteService {
@@ -56,14 +98,15 @@ class TransitRouteService {
         appKey: _transportApiAppKey,
       );
 
-
   Future<PublicTransportResult> getPublicTransportSummary({
     required String destinationName,
+    required LatLng origin,
     required LatLng destination,
   }) async {
     try {
-      final train = await _getNearestTrain(
+      final trainBetween = await _getTrainBetween(
         destinationName: destinationName,
+        origin: origin,
         destination: destination,
       );
 
@@ -73,19 +116,33 @@ class TransitRouteService {
       );
 
       return PublicTransportResult(
-        train: train,
+        trainBetween: trainBetween,
         bus: bus,
       );
     } catch (e) {
+      // ignore: avoid_print
       print('TransitRouteService error: $e');
 
-      // Safe fallback so the card still works even if API fails
+      // Safe fallback
       return PublicTransportResult(
-        train: NearbyTrainInfo(
-          stationName: '$destinationName Station',
-          distanceMeters: 1200,
-          stationCode: null,
-          ticketUrl: _buildTrainTicketUrl(destinationName),
+        trainBetween: TrainBetweenResult(
+          fromOrigin: NearbyTrainInfo(
+            stationName: 'Nearest station',
+            distanceMeters: 1200,
+            stationLatLng: origin,
+            hasCoordinates: false,
+
+            stationCode: null,
+            ticketUrl: _buildTrainTicketUrl('Nearest station'),
+          ),
+          toDestination: NearbyTrainInfo(
+            stationName: '$destinationName Station',
+            distanceMeters: 1200,
+            stationLatLng: destination,
+            hasCoordinates: false,
+            stationCode: null,
+            ticketUrl: _buildTrainTicketUrl('$destinationName Station'),
+          ),
         ),
         bus: NearbyBusInfo(
           title: 'Bus journeys nearby',
@@ -96,13 +153,31 @@ class TransitRouteService {
     }
   }
 
-  Future<NearbyTrainInfo?> _getNearestTrain({
+  Future<TrainBetweenResult> _getTrainBetween({
     required String destinationName,
+    required LatLng origin,
     required LatLng destination,
   }) async {
+    final fromOrigin = await _getNearestTrain(
+      destinationName: destinationName,
+      point: origin,
+    );
+
+    final toDestination = await _getNearestTrain(
+      destinationName: destinationName,
+      point: destination,
+    );
+
+    return TrainBetweenResult(fromOrigin: fromOrigin, toDestination: toDestination);
+  }
+
+  Future<NearbyTrainInfo?> _getNearestTrain({
+    required String destinationName,
+    required LatLng point,
+  }) async {
     final data = await _transportApi.searchNearbyPlaces(
-      latitude: destination.latitude,
-      longitude: destination.longitude,
+      latitude: point.latitude,
+      longitude: point.longitude,
       type: 'train_station',
       maxResults: 1,
     );
@@ -115,12 +190,17 @@ class TransitRouteService {
         .toString();
 
     final stationCode = member['station_code']?.toString();
-
     final distanceMeters = _readDistanceMeters(member) ?? 0;
+
+    final lat = _readDouble(member, ['latitude', 'lat', 'y']);
+    final lon = _readDouble(member, ['longitude', 'lon', 'lng', 'x']);
+    final hasCoords = lat != null && lon != null;
 
     return NearbyTrainInfo(
       stationName: name,
       distanceMeters: distanceMeters,
+      stationLatLng: hasCoords ? LatLng(lat!, lon!) : point,
+      hasCoordinates: hasCoords,
       stationCode: stationCode,
       ticketUrl: _buildTrainTicketUrl(name),
     );
@@ -140,14 +220,11 @@ class TransitRouteService {
     final member = _extractFirstPlace(data);
     if (member == null) return null;
 
-    final stopName =
-    (member['name'] ?? member['description'] ?? 'Bus journeys nearby')
-        .toString();
-
+    final stopName = (member['name'] ?? member['description'] ?? 'Bus journeys nearby').toString();
     final distanceMeters = _readDistanceMeters(member) ?? 0;
 
     return NearbyBusInfo(
-      title: 'Bus journeys nearby',
+      title: stopName.isEmpty ? 'Bus journeys nearby' : stopName,
       distanceMeters: distanceMeters,
       timetableUrl: _buildBusTimetableUrl(stopName.isEmpty ? destinationName : stopName),
     );
@@ -171,6 +248,18 @@ class TransitRouteService {
     final raw = item['distance'] ?? item['distance_meters'] ?? item['dist'];
     if (raw is num) return raw.toDouble();
     if (raw is String) return double.tryParse(raw);
+    return null;
+  }
+
+  double? _readDouble(Map<String, dynamic> item, List<String> keys) {
+    for (final k in keys) {
+      final v = item[k];
+      if (v is num) return v.toDouble();
+      if (v is String) {
+        final parsed = double.tryParse(v);
+        if (parsed != null) return parsed;
+      }
+    }
     return null;
   }
 

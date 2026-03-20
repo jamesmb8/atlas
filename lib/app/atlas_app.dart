@@ -14,11 +14,8 @@ class AtlasApp extends StatelessWidget {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Atlas',
-      home: RouteOptionsScreen(
-        destinationName: 'Sheffield Station',
-        origin: LatLng(53.3811, -1.4701),
-        destination: LatLng(53.3780, -1.4620),
-      ),
+      home: LandingScreen()
+
     );
   }
 }

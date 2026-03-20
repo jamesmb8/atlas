@@ -1,3 +1,4 @@
+// lib/screens/home/home_screen.dart
 import 'dart:async';
 
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
@@ -7,7 +8,6 @@ import 'package:geolocator/geolocator.dart';
 
 import '../../features/routes/directions.dart';
 import '../../features/search/place_search.dart';
-
 
 class AtlasPalette {
   static const background = Color(0xFFF7F6F2);
@@ -27,25 +27,37 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   AppleMapController? _mapController;
 
+  // Destination
   String? _selectedPlaceName;
   LatLng? _selectedPlaceLatLng;
 
+  // Origin (optional override)
+  String? _originPlaceName;
+  LatLng? _originLatLng;
+
+  // Current location
   LatLng? _userLatLng;
   bool _locLoading = true;
 
-  final Set<Annotation> _annotations = {}; // we’ll keep empty if you dislike pins
+  final Set<Annotation> _annotations = {};
   final Set<Polyline> _polylines = {};
 
   static const _fallbackCamera = CameraPosition(
-    target: LatLng(53.3811, -1.4701), // Sheffield fallback
+    target: LatLng(53.3811, -1.4701),
     zoom: 12,
   );
+
+  LatLng? get _originToUse => _originLatLng ?? _userLatLng;
+
+  String get _originPlaceholder {
+    if (_originPlaceName != null) return _originPlaceName!;
+    if (_locLoading) return 'Current location…';
+    return 'Current location';
+  }
 
   @override
   void initState() {
     super.initState();
-    // Don't call _loadUserLocation() here because _mapController isn't ready yet.
-    // We'll call it inside onMapCreated.
   }
 
   Future<void> _loadUserLocation() async {
@@ -93,9 +105,23 @@ class _HomeScreenState extends State<HomeScreen> {
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: _SearchPill(
-                placeholder: _selectedPlaceName ?? "Where to?",
-                onPressed: _openPlacePicker,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _SearchPill(
+                    placeholder: _originPlaceholder,
+                    leadingIcon: Icons.trip_origin_rounded,
+                    onPressed: _openOriginPicker,
+                    trailingIcon: _originLatLng != null ? Icons.close_rounded : Icons.arrow_forward_ios_rounded,
+                    onTrailingPressed: _originLatLng != null ? _clearOriginOverride : null,
+                  ),
+                  const SizedBox(height: 10),
+                  _SearchPill(
+                    placeholder: _selectedPlaceName ?? "Where to?",
+                    leadingIcon: Icons.search,
+                    onPressed: _openPlacePicker,
+                  ),
+                ],
               ),
             ),
           ),
@@ -105,32 +131,59 @@ class _HomeScreenState extends State<HomeScreen> {
             bottom: 210,
             child: _RoundIconButton(
               icon: Icons.my_location,
-              onPressed: _recenterToUser,
+              onPressed: _recenterToOrigin,
             ),
           ),
 
           _HomeBottomSheet(
             selectedPlaceName: _selectedPlaceName,
             onFindPlace: _openPlacePicker,
-            onGo: (_selectedPlaceLatLng != null) ? () => _goToOptions(context) : null,
+            onGo: (_selectedPlaceLatLng != null && _originToUse != null)
+                ? () => _goToOptions(context)
+                : null,
           ),
         ],
       ),
     );
   }
 
-  Future<void> _recenterToUser() async {
+  void _clearOriginOverride() {
+    setState(() {
+      _originLatLng = null;
+      _originPlaceName = null;
+    });
+    _refreshRouteIfNeeded();
+  }
+
+  Future<void> _recenterToOrigin() async {
     final ctrl = _mapController;
-    final user = _userLatLng;
     if (ctrl == null) return;
 
-    if (user != null) {
+    final origin = _originToUse;
+    if (origin != null) {
       await ctrl.animateCamera(
-        CameraUpdate.newCameraPosition(CameraPosition(target: user, zoom: 14)),
+        CameraUpdate.newCameraPosition(CameraPosition(target: origin, zoom: 14)),
       );
-    } else {
-      await ctrl.animateCamera(CameraUpdate.newCameraPosition(_fallbackCamera));
+      return;
     }
+
+    await ctrl.animateCamera(CameraUpdate.newCameraPosition(_fallbackCamera));
+  }
+
+  Future<void> _openOriginPicker() async {
+    final result = await Navigator.push<ResolvedPlace>(
+      context,
+      MaterialPageRoute(builder: (_) => const PlaceSearchScreen()),
+    );
+
+    if (result == null) return;
+
+    setState(() {
+      _originPlaceName = result.title;
+      _originLatLng = result.latLng;
+    });
+
+    _refreshRouteIfNeeded();
   }
 
   Future<void> _openPlacePicker() async {
@@ -143,7 +196,15 @@ class _HomeScreenState extends State<HomeScreen> {
     await _setDestination(name: result.title, latLng: result.latLng);
   }
 
-  /// Sets destination, then draws a *real road-following polyline* using MKDirections.
+  void _refreshRouteIfNeeded() {
+    final dest = _selectedPlaceLatLng;
+    final name = _selectedPlaceName;
+    final origin = _originToUse;
+    if (dest == null || name == null || origin == null) return;
+
+    _setDestination(name: name, latLng: dest);
+  }
+
   Future<void> _setDestination({
     required String name,
     required LatLng latLng,
@@ -156,7 +217,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ..clear()
         ..add(
           Annotation(
-            annotationId: AnnotationId('destination'),
+            annotationId:  AnnotationId('destination'),
             position: latLng,
             infoWindow: InfoWindow(title: name),
           ),
@@ -165,14 +226,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _polylines.clear();
     });
 
-    // First: always move camera to the chosen destination
     await _mapController?.animateCamera(
       CameraUpdate.newCameraPosition(
         CameraPosition(target: latLng, zoom: 14),
       ),
     );
 
-    final origin = _userLatLng;
+    final origin = _originToUse;
     if (origin == null) return;
 
     try {
@@ -191,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ..clear()
           ..add(
             Polyline(
-              polylineId: PolylineId('route'),
+              polylineId:  PolylineId('route'),
               points: routePoints,
               width: 6,
             ),
@@ -201,8 +261,6 @@ class _HomeScreenState extends State<HomeScreen> {
       await _zoomToPolyline(routePoints);
     } catch (e) {
       debugPrint('Route generation failed: $e');
-
-      // Fallback: keep the map on the selected destination
       await _mapController?.animateCamera(
         CameraUpdate.newCameraPosition(
           CameraPosition(target: latLng, zoom: 14),
@@ -245,7 +303,7 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => RouteOptionsScreen(
           destinationName: name,
           destination: dest,
-          origin: _userLatLng,
+          origin: _originToUse,
         ),
       ),
     );
@@ -254,15 +312,24 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _SearchPill extends StatelessWidget {
   final String placeholder;
+  final IconData leadingIcon;
   final VoidCallback onPressed;
+
+  final IconData? trailingIcon;
+  final VoidCallback? onTrailingPressed;
 
   const _SearchPill({
     required this.placeholder,
+    required this.leadingIcon,
     required this.onPressed,
+    this.trailingIcon,
+    this.onTrailingPressed,
   });
 
   @override
   Widget build(BuildContext context) {
+    final hasTrailing = trailingIcon != null;
+
     return Material(
       color: Colors.white.withOpacity(0.78),
       borderRadius: BorderRadius.circular(18),
@@ -278,7 +345,7 @@ class _SearchPill extends StatelessWidget {
           ),
           child: Row(
             children: [
-              const Icon(Icons.search, color: AtlasPalette.secondaryText),
+              Icon(leadingIcon, color: AtlasPalette.secondaryText),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -292,8 +359,25 @@ class _SearchPill extends StatelessWidget {
                   ),
                 ),
               ),
-              const Icon(Icons.arrow_forward_ios_rounded,
-                  size: 16, color: AtlasPalette.secondaryText),
+              if (hasTrailing)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onTrailingPressed,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 10),
+                    child: Icon(
+                      trailingIcon,
+                      size: trailingIcon == Icons.close_rounded ? 20 : 16,
+                      color: AtlasPalette.secondaryText,
+                    ),
+                  ),
+                )
+              else
+                const Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 16,
+                  color: AtlasPalette.secondaryText,
+                ),
             ],
           ),
         ),
@@ -331,6 +415,10 @@ class _RoundIconButton extends StatelessWidget {
     );
   }
 }
+
+// Keep your existing _HomeBottomSheet / _PrimaryButton / _RecentRow unchanged.
+
+// Your existing _HomeBottomSheet / _PrimaryButton / _RecentRow can remain unchanged.
 class _HomeBottomSheet extends StatelessWidget {
   final String? selectedPlaceName;
   final VoidCallback onFindPlace;

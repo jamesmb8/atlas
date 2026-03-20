@@ -18,12 +18,12 @@ class RouteOption {
   final String tag;
   final int durationMinutes;
   final double distanceMeters;
-  final double? estimatedCost;
+  final double? estimatedCost; // keep for exact costs (walk=0, etc.)
+  final String? costText; // use for ranges like "£6.00–£22.00"
   final double co2Kg;
   final String description;
   final String source;
 
-  /// Optional CTAs for this card (e.g. "Open in Maps", "Tickets", "Timetable")
   final RouteOptionAction? primaryAction;
   final RouteOptionAction? secondaryAction;
 
@@ -36,6 +36,7 @@ class RouteOption {
     required this.co2Kg,
     required this.description,
     required this.source,
+    this.costText,
     this.primaryAction,
     this.secondaryAction,
   });

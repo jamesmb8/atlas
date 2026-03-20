@@ -195,12 +195,19 @@ class _RouteOptionCard extends StatelessWidget {
     return '£${minFare.toStringAsFixed(2)}–£${maxFare.toStringAsFixed(2)}';
   }
 
+  // inside _RouteOptionCard
+
   String _formatCost(RouteOption option) {
+    if (option.costText != null && option.costText!.trim().isNotEmpty) {
+      return option.costText!;
+    }
+
     if (option.estimatedCost != null) {
       return '£${option.estimatedCost!.toStringAsFixed(2)}';
     }
 
     if (option.mode.toLowerCase() == 'public transport') {
+      // fallback heuristic for bus or unknown
       return _formatPublicTransportFareRange(option.distanceMeters);
     }
 
