@@ -1,3 +1,4 @@
+// lib/services/routeservice.dart
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import '../features/routes/route_option.dart';
 import 'applerouteservice.dart';
@@ -9,18 +10,31 @@ class RouteOptionsService {
   final TransitRouteService _transitRouteService;
   final Co2Service _co2Service;
 
+  RouteOptionsService({
+    AppleRouteService? appleRouteService,
+    TransitRouteService? transitRouteService,
+    Co2Service? co2Service,
+  })  : _appleRouteService = appleRouteService ?? const AppleRouteService(),
+        _transitRouteService = transitRouteService ?? TransitRouteService(),
+        _co2Service = co2Service ?? const Co2Service();
 
-  const RouteOptionsService({
-    AppleRouteService appleRouteService = const AppleRouteService(),
-    TransitRouteService transitRouteService = const TransitRouteService(),
-    Co2Service co2Service = const Co2Service(),
-  })  : _appleRouteService = appleRouteService,
-        _transitRouteService = transitRouteService,
-        _co2Service = co2Service;
+  Uri _appleMapsDirectionsUrl({
+    required LatLng origin,
+    required LatLng destination,
+    required String modeFlag, // 'w' walking, 'd' driving
+  }) {
+    return Uri.parse(
+      'http://maps.apple.com/?'
+          'saddr=${origin.latitude},${origin.longitude}'
+          '&daddr=${destination.latitude},${destination.longitude}'
+          '&dirflg=$modeFlag',
+    );
+  }
 
   Future<List<RouteOption>> buildOptions({
     required LatLng? origin,
     required LatLng destination,
+    required String destinationName,
   }) async {
     if (origin == null) return const [];
 
@@ -30,7 +44,6 @@ class RouteOptionsService {
       origin: origin,
       destination: destination,
     );
-    print('walking route result: $walking');
 
     if (walking != null) {
       options.add(
@@ -43,6 +56,14 @@ class RouteOptionsService {
           co2Kg: _co2Service.walkingKg(walking.distanceMeters),
           description: 'Route data from Apple Maps.',
           source: 'Apple Maps',
+          primaryAction: RouteOptionAction(
+            label: 'Open in Maps',
+            uri: _appleMapsDirectionsUrl(
+              origin: origin,
+              destination: destination,
+              modeFlag: 'w',
+            ),
+          ),
         ),
       );
     }
@@ -51,7 +72,6 @@ class RouteOptionsService {
       origin: origin,
       destination: destination,
     );
-    print('driving route result: $driving');
 
     if (driving != null) {
       options.add(
@@ -64,26 +84,69 @@ class RouteOptionsService {
           co2Kg: _co2Service.drivingKg(driving.distanceMeters),
           description: 'Driving time and distance from Apple Maps.',
           source: 'Apple Maps',
+          primaryAction: RouteOptionAction(
+            label: 'Open in Maps',
+            uri: _appleMapsDirectionsUrl(
+              origin: origin,
+              destination: destination,
+              modeFlag: 'd',
+            ),
+          ),
         ),
       );
     }
 
-    final transit = await _transitRouteService.getTransitRoute(
-      origin: origin,
+    final transport = await _transitRouteService.getPublicTransportSummary(
+      destinationName: destinationName,
       destination: destination,
     );
 
-    if (transit != null) {
+    if (transport.hasAnyData) {
+      final train = transport.train;
+      final bus = transport.bus;
+
+      final lines = <String>[];
+
+      RouteOptionAction? primary;
+      RouteOptionAction? secondary;
+
+      if (train != null) {
+        lines.add(
+          'Train station: ${train.stationName} '
+              '(${train.distanceMiles.toStringAsFixed(1)} miles away)',
+        );
+        primary = RouteOptionAction(
+          label: 'Tickets',
+          uri: Uri.parse(train.ticketUrl),
+        );
+      }
+
+      if (bus != null) {
+        lines.add(
+          'Bus stop: ${bus.title} '
+              '(${bus.distanceMiles.toStringAsFixed(1)} miles away)',
+        );
+        secondary = RouteOptionAction(
+          label: 'Timetable',
+          uri: Uri.parse(bus.timetableUrl),
+        );
+      }
+
+      final transportDistanceMeters =
+          train?.distanceMeters ?? bus?.distanceMeters ?? 0;
+
       options.add(
         RouteOption(
           mode: 'Public Transport',
-          tag: 'Lower CO₂',
-          durationMinutes: transit.durationMinutes,
-          distanceMeters: transit.distanceMeters,
-          estimatedCost: transit.fareGbp,
-          co2Kg: _co2Service.publicTransportKg(transit.distanceMeters),
-          description: 'Transit data from connected provider.',
-          source: 'Transit API',
+          tag: 'Nearby',
+          durationMinutes: 0,
+          distanceMeters: transportDistanceMeters,
+          estimatedCost: null,
+          co2Kg: _co2Service.publicTransportKg(transportDistanceMeters),
+          description: lines.join('\n'),
+          source: 'Atlas transport info',
+          primaryAction: primary,
+          secondaryAction: secondary,
         ),
       );
     }

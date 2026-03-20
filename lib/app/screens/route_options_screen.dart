@@ -23,7 +23,7 @@ class RouteOptionsScreen extends StatefulWidget {
 }
 
 class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
-  final RouteOptionsService _routeOptionsService = const RouteOptionsService();
+  final RouteOptionsService _routeOptionsService = RouteOptionsService();
 
   bool _loading = true;
   List<RouteOption> _options = [];
@@ -45,6 +45,7 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
       final options = await _routeOptionsService.buildOptions(
         origin: widget.origin,
         destination: widget.destination,
+        destinationName: widget.destinationName,
       );
 
       if (!mounted) return;
@@ -63,23 +64,11 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
     }
   }
 
-  Future<void> _openInAppleMaps() async {
-    final lat = widget.destination.latitude;
-    final lng = widget.destination.longitude;
-
-    final uri = Uri.parse('http://maps.apple.com/?daddr=$lat,$lng');
-
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     const bg = Color(0xFFF7F6F2);
     const primaryText = Color(0xFF1F1F1F);
     const secondaryText = Color(0xFF6B6E6A);
-    const accent = Color(0xFF9FC8B2);
     const border = Color(0xFFE3E4DE);
 
     return Scaffold(
@@ -103,88 +92,54 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
         ),
       ),
       body: SafeArea(
-        child: Column(
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+            ? Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Text(
+              _error!,
+              style: const TextStyle(color: Colors.red),
+            ),
+          ),
+        )
+            : ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           children: [
-            Expanded(
-              child: _loading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _error != null
-                  ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    _error!,
-                    style: const TextStyle(color: Colors.red),
-                  ),
+            const Text(
+              'Journey options',
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w400,
+                color: primaryText,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${widget.destination.latitude.toStringAsFixed(5)}, ${widget.destination.longitude.toStringAsFixed(5)}',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+                color: secondaryText,
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (_options.isEmpty)
+              const Text(
+                'No route options available yet.',
+                style: TextStyle(
+                  fontSize: 15,
+                  color: secondaryText,
                 ),
               )
-                  : ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                children: [
-                  const Text(
-                    'Journey options',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w400,
-                      color: primaryText,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '${widget.destination.latitude.toStringAsFixed(5)}, ${widget.destination.longitude.toStringAsFixed(5)}',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w400,
-                      color: secondaryText,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  if (_options.isEmpty)
-                    const Text(
-                      'No route options available yet.',
-                      style: TextStyle(
-                        fontSize: 15,
-                        color: secondaryText,
-                      ),
-                    )
-                  else
-                    ..._options.map(
-                          (option) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: _RouteOptionCard(option: option),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-              child: SafeArea(
-                top: false,
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: ElevatedButton(
-                    onPressed: _openInAppleMaps,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: accent,
-                      foregroundColor: primaryText,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                    ),
-                    child: const Text(
-                      'Open in Apple Maps',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                  ),
+            else
+              ..._options.map(
+                    (option) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _RouteOptionCard(option: option),
                 ),
               ),
-            ),
           ],
         ),
       ),
@@ -215,12 +170,68 @@ class _RouteOptionCard extends StatelessWidget {
     return '${km.toStringAsFixed(1)} km';
   }
 
+  bool _shouldShowTime(RouteOption option) {
+    if (option.mode.toLowerCase() == 'public transport') return false;
+    return option.durationMinutes > 0;
+  }
+
+  String _formatPublicTransportFareRange(double distanceMeters) {
+    final km = distanceMeters / 1000.0;
+
+    double minFare;
+    double maxFare;
+
+    if (km <= 2) {
+      minFare = 1.20;
+      maxFare = 2.00;
+    } else if (km <= 5) {
+      minFare = 1.80;
+      maxFare = 3.50;
+    } else {
+      minFare = 2.50;
+      maxFare = 4.60;
+    }
+
+    return '£${minFare.toStringAsFixed(2)}–£${maxFare.toStringAsFixed(2)}';
+  }
+
+  String _formatCost(RouteOption option) {
+    if (option.estimatedCost != null) {
+      return '£${option.estimatedCost!.toStringAsFixed(2)}';
+    }
+
+    if (option.mode.toLowerCase() == 'public transport') {
+      return _formatPublicTransportFareRange(option.distanceMeters);
+    }
+
+    return '—';
+  }
+
+  Future<void> _launchExternal(Uri uri) async {
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     const primaryText = Color(0xFF1F1F1F);
     const secondaryText = Color(0xFF6B6E6A);
     const accent = Color(0xFF9FC8B2);
     const border = Color(0xFFE3E4DE);
+
+    final showTime = _shouldShowTime(option);
+
+    final metrics = <Widget>[
+      if (showTime) Metric(label: 'Time', value: '${option.durationMinutes} min'),
+      Metric(label: 'Cost', value: _formatCost(option)),
+      Metric(label: 'CO₂', value: '${option.co2Kg.toStringAsFixed(2)} kg'),
+    ];
+
+    final actions = <RouteOptionAction>[
+      if (option.primaryAction != null) option.primaryAction!,
+      if (option.secondaryAction != null) option.secondaryAction!,
+    ];
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -265,25 +276,7 @@ class _RouteOptionCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Row(
-            children: [
-              Expanded(
-                child: Metric(label: 'Time', value: '${option.durationMinutes} min'),
-              ),
-              Expanded(
-                child: Metric(
-                  label: 'Cost',
-                  value: option.estimatedCost == null
-                      ? '—'
-                      : '£${option.estimatedCost!.toStringAsFixed(2)}',
-                ),
-              ),
-              Expanded(
-                child: Metric(
-                  label: 'CO₂',
-                  value: '${option.co2Kg.toStringAsFixed(2)} kg',
-                ),
-              ),
-            ],
+            children: metrics.map((m) => Expanded(child: m)).toList(growable: false),
           ),
           const SizedBox(height: 10),
           Metric(label: 'Distance', value: _formatDistance(option.distanceMeters)),
@@ -294,7 +287,7 @@ class _RouteOptionCard extends StatelessWidget {
               fontSize: 14,
               fontWeight: FontWeight.w400,
               color: secondaryText,
-              height: 1.3,
+              height: 1.35,
             ),
           ),
           const SizedBox(height: 6),
@@ -306,6 +299,37 @@ class _RouteOptionCard extends StatelessWidget {
               color: secondaryText,
             ),
           ),
+          if (actions.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: actions
+                  .map(
+                    (a) => SizedBox(
+                  height: 36,
+                  child: OutlinedButton(
+                    onPressed: () => _launchExternal(a.uri),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: primaryText,
+                      side: BorderSide(color: border),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    child: Text(
+                      a.label,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                ),
+              )
+                  .toList(growable: false),
+            ),
+          ],
         ],
       ),
     );
