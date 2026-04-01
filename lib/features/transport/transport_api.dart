@@ -12,7 +12,6 @@ class TransportApi {
     http.Client? client,
   }) : _client = client ?? http.Client();
 
-
   static const String _baseUrl = 'https://transportapi.com/v3/uk';
 
   Future<Map<String, dynamic>> searchNearbyPlaces({
@@ -21,11 +20,6 @@ class TransportApi {
     required String type,
     int maxResults = 5,
   }) async {
-    // NOTE:
-    // Keep this as the single place where the endpoint path is defined.
-    // If your exact TransportAPI plan/docs use a slightly different places path,
-    // only change it here.
-
     final uri = Uri.parse('$_baseUrl/places.json').replace(
       queryParameters: {
         'lat': latitude.toString(),
@@ -45,7 +39,32 @@ class TransportApi {
       );
     }
 
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    return decoded;
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> searchNearbyPlacesList({
+    required double latitude,
+    required double longitude,
+    required String type,
+    int maxResults = 5,
+  }) async {
+    final decoded = await searchNearbyPlaces(
+      latitude: latitude,
+      longitude: longitude,
+      type: type,
+      maxResults: maxResults,
+    );
+
+    final members = decoded['member'];
+    if (members is List) {
+      return members.whereType<Map<String, dynamic>>().toList(growable: false);
+    }
+
+    final results = decoded['results'];
+    if (results is List) {
+      return results.whereType<Map<String, dynamic>>().toList(growable: false);
+    }
+
+    return const [];
   }
 }

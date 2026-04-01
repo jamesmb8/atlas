@@ -1,4 +1,3 @@
-// lib/services/transitrouteservice.dart
 import 'dart:math' as math;
 
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
@@ -7,57 +6,64 @@ import '../features/transport/transport_api.dart';
 const _transportApiAppId = String.fromEnvironment('TRANSPORT_API_APP_ID');
 const _transportApiAppKey = String.fromEnvironment('TRANSPORT_API_APP_KEY');
 
-class NearbyTrainInfo {
-  final String stationName;
-  final double distanceMeters; // distance from queried point -> station
-  final String? stationCode;
-  final String ticketUrl;
-  final LatLng stationLatLng;
-  final bool hasCoordinates;
-
-
-  const NearbyTrainInfo({
-    required this.stationName,
-    required this.distanceMeters,
-    required this.stationLatLng,
-    required this.hasCoordinates,
-    this.stationCode,
-    required this.ticketUrl,
-  });
-
-  double get distanceMiles => distanceMeters / 1609.344;
+enum PublicTransportMode {
+  bus,
+  train,
 }
 
-class NearbyBusInfo {
-  final String title;
+class TransitAccessPoint {
+  final String name;
   final double distanceMeters;
-  final String timetableUrl;
+  final LatLng latLng;
+  final bool hasCoordinates;
+  final String? code;
+  final String detailsUrl;
+  final PublicTransportMode mode;
 
-  const NearbyBusInfo({
-    required this.title,
+  const TransitAccessPoint({
+    required this.name,
     required this.distanceMeters,
-    required this.timetableUrl,
+    required this.latLng,
+    required this.hasCoordinates,
+    required this.detailsUrl,
+    required this.mode,
+    this.code,
   });
 
   double get distanceMiles => distanceMeters / 1609.344;
+  double get distanceKm => distanceMeters / 1000.0;
 }
 
-class TrainBetweenResult {
-  final NearbyTrainInfo? fromOrigin;
-  final NearbyTrainInfo? toDestination;
+class TransitPairResult {
+  final TransitAccessPoint? fromOrigin;
+  final TransitAccessPoint? toDestination;
+  final PublicTransportMode mode;
 
-  const TrainBetweenResult({
+  const TransitPairResult({
     required this.fromOrigin,
     required this.toDestination,
+    required this.mode,
   });
 
   bool get hasBoth => fromOrigin != null && toDestination != null;
 
-  double? get stationsDistanceMeters {
-    final a = fromOrigin?.stationLatLng;
-    final b = toDestination?.stationLatLng;
+  double? get accessDistanceMeters {
+    if (!hasBoth) return null;
+    return (fromOrigin!.distanceMeters + toDestination!.distanceMeters);
+  }
+
+  double? get lineDistanceMeters {
+    final a = fromOrigin?.latLng;
+    final b = toDestination?.latLng;
     if (a == null || b == null) return null;
     return _haversineMeters(a, b);
+  }
+
+  double? get totalJourneyDistanceMeters {
+    final line = lineDistanceMeters;
+    final access = accessDistanceMeters;
+    if (line == null || access == null) return null;
+    return line + access;
   }
 
   static double _haversineMeters(LatLng a, LatLng b) {
@@ -76,16 +82,69 @@ class TrainBetweenResult {
   static double _degToRad(double d) => d * (math.pi / 180.0);
 }
 
-class PublicTransportResult {
-  final TrainBetweenResult trainBetween;
-  final NearbyBusInfo? bus;
+class FareEstimate {
+  final double min;
+  final double max;
+  final String label;
 
-  const PublicTransportResult({
-    required this.trainBetween,
-    required this.bus,
+  const FareEstimate({
+    required this.min,
+    required this.max,
+    required this.label,
   });
 
-  bool get hasAnyData => trainBetween.fromOrigin != null || trainBetween.toDestination != null || bus != null;
+  String get formatted {
+    if ((max - min).abs() < 0.01) {
+      return '£${min.toStringAsFixed(2)}';
+    }
+    return '£${min.toStringAsFixed(2)}–£${max.toStringAsFixed(2)}';
+  }
+}
+
+class PublicTransportResult {
+  final TransitPairResult bus;
+  final TransitPairResult train;
+  final PublicTransportMode? recommendedMode;
+  final FareEstimate? recommendedFare;
+  final FareEstimate? alternativeFare;
+
+  const PublicTransportResult({
+    required this.bus,
+    required this.train,
+    required this.recommendedMode,
+    required this.recommendedFare,
+    required this.alternativeFare,
+  });
+
+  bool get hasAnyData =>
+      bus.fromOrigin != null ||
+          bus.toDestination != null ||
+          train.fromOrigin != null ||
+          train.toDestination != null;
+
+  TransitPairResult? get recommended {
+    switch (recommendedMode) {
+      case PublicTransportMode.bus:
+        return bus.hasBoth ? bus : null;
+      case PublicTransportMode.train:
+        return train.hasBoth ? train : null;
+      case null:
+        return null;
+    }
+  }
+
+  TransitPairResult? get alternative {
+    switch (recommendedMode) {
+      case PublicTransportMode.bus:
+        return train.hasBoth ? train : null;
+      case PublicTransportMode.train:
+        return bus.hasBoth ? bus : null;
+      case null:
+        if (train.hasBoth) return train;
+        if (bus.hasBoth) return bus;
+        return null;
+    }
+  }
 }
 
 class TransitRouteService {
@@ -98,150 +157,292 @@ class TransitRouteService {
         appKey: _transportApiAppKey,
       );
 
+  bool get _hasApiCredentials =>
+      _transportApiAppId.trim().isNotEmpty && _transportApiAppKey.trim().isNotEmpty;
+
   Future<PublicTransportResult> getPublicTransportSummary({
     required String destinationName,
     required LatLng origin,
     required LatLng destination,
   }) async {
-    try {
-      final trainBetween = await _getTrainBetween(
+    if (!_hasApiCredentials) {
+      return _fallbackResult(
         destinationName: destinationName,
         origin: origin,
         destination: destination,
       );
+    }
 
-      final bus = await _getNearbyBus(
-        destinationName: destinationName,
-        destination: destination,
+    try {
+      final results = await Future.wait([
+        _getNearestTransitPair(
+          destinationName: destinationName,
+          origin: origin,
+          destination: destination,
+          mode: PublicTransportMode.bus,
+        ),
+        _getNearestTransitPair(
+          destinationName: destinationName,
+          origin: origin,
+          destination: destination,
+          mode: PublicTransportMode.train,
+        ),
+      ]);
+
+      final bus = results[0];
+      final train = results[1];
+      final recommendedMode = _chooseRecommendedMode(bus, train);
+      final recommendedFare = _estimateFareForMode(
+        recommendedMode,
+        recommendedMode == PublicTransportMode.train ? train : bus,
+      );
+      final alternativeFare = _estimateFareForMode(
+        recommendedMode == PublicTransportMode.train
+            ? PublicTransportMode.bus
+            : PublicTransportMode.train,
+        recommendedMode == PublicTransportMode.train ? bus : train,
       );
 
       return PublicTransportResult(
-        trainBetween: trainBetween,
         bus: bus,
+        train: train,
+        recommendedMode: recommendedMode,
+        recommendedFare: recommendedFare,
+        alternativeFare: alternativeFare,
       );
     } catch (e) {
-      // ignore: avoid_print
       print('TransitRouteService error: $e');
-
-      // Safe fallback
-      return PublicTransportResult(
-        trainBetween: TrainBetweenResult(
-          fromOrigin: NearbyTrainInfo(
-            stationName: 'Nearest station',
-            distanceMeters: 1200,
-            stationLatLng: origin,
-            hasCoordinates: false,
-
-            stationCode: null,
-            ticketUrl: _buildTrainTicketUrl('Nearest station'),
-          ),
-          toDestination: NearbyTrainInfo(
-            stationName: '$destinationName Station',
-            distanceMeters: 1200,
-            stationLatLng: destination,
-            hasCoordinates: false,
-            stationCode: null,
-            ticketUrl: _buildTrainTicketUrl('$destinationName Station'),
-          ),
-        ),
-        bus: NearbyBusInfo(
-          title: 'Bus journeys nearby',
-          distanceMeters: 350,
-          timetableUrl: _buildBusTimetableUrl(destinationName),
-        ),
+      return _fallbackResult(
+        destinationName: destinationName,
+        origin: origin,
+        destination: destination,
       );
     }
   }
 
-  Future<TrainBetweenResult> _getTrainBetween({
+  PublicTransportResult _fallbackResult({
     required String destinationName,
     required LatLng origin,
     required LatLng destination,
-  }) async {
-    final fromOrigin = await _getNearestTrain(
-      destinationName: destinationName,
-      point: origin,
+  }) {
+    final bus = TransitPairResult(
+      mode: PublicTransportMode.bus,
+      fromOrigin: TransitAccessPoint(
+        name: 'Nearest bus stop',
+        distanceMeters: 280,
+        latLng: origin,
+        hasCoordinates: false,
+        detailsUrl: _buildBusTimetableUrl('Nearest bus stop'),
+        mode: PublicTransportMode.bus,
+      ),
+      toDestination: TransitAccessPoint(
+        name: '$destinationName Bus Stop',
+        distanceMeters: 320,
+        latLng: destination,
+        hasCoordinates: false,
+        detailsUrl: _buildBusTimetableUrl('$destinationName Bus Stop'),
+        mode: PublicTransportMode.bus,
+      ),
     );
 
-    final toDestination = await _getNearestTrain(
-      destinationName: destinationName,
-      point: destination,
+    final train = TransitPairResult(
+      mode: PublicTransportMode.train,
+      fromOrigin: TransitAccessPoint(
+        name: 'Nearest station',
+        distanceMeters: 1200,
+        latLng: origin,
+        hasCoordinates: false,
+        code: null,
+        detailsUrl: _buildTrainTicketUrl('Nearest station'),
+        mode: PublicTransportMode.train,
+      ),
+      toDestination: TransitAccessPoint(
+        name: '$destinationName Station',
+        distanceMeters: 1100,
+        latLng: destination,
+        hasCoordinates: false,
+        code: null,
+        detailsUrl: _buildTrainTicketUrl('$destinationName Station'),
+        mode: PublicTransportMode.train,
+      ),
     );
 
-    return TrainBetweenResult(fromOrigin: fromOrigin, toDestination: toDestination);
+    return PublicTransportResult(
+      bus: bus,
+      train: train,
+      recommendedMode: PublicTransportMode.bus,
+      recommendedFare: _estimateBusFare(bus),
+      alternativeFare: _estimateTrainFare(train),
+    );
   }
 
-  Future<NearbyTrainInfo?> _getNearestTrain({
+  Future<TransitPairResult> _getNearestTransitPair({
+    required String destinationName,
+    required LatLng origin,
+    required LatLng destination,
+    required PublicTransportMode mode,
+  }) async {
+    final type = mode == PublicTransportMode.train ? 'train_station' : 'bus_stop';
+
+    final points = await Future.wait([
+      _getNearestTransitPoint(
+        destinationName: destinationName,
+        point: origin,
+        mode: mode,
+        type: type,
+      ),
+      _getNearestTransitPoint(
+        destinationName: destinationName,
+        point: destination,
+        mode: mode,
+        type: type,
+      ),
+    ]);
+
+    return TransitPairResult(
+      mode: mode,
+      fromOrigin: points[0],
+      toDestination: points[1],
+    );
+  }
+
+  Future<TransitAccessPoint?> _getNearestTransitPoint({
     required String destinationName,
     required LatLng point,
+    required PublicTransportMode mode,
+    required String type,
   }) async {
-    final data = await _transportApi.searchNearbyPlaces(
+    final data = await _transportApi.searchNearbyPlacesList(
       latitude: point.latitude,
       longitude: point.longitude,
-      type: 'train_station',
+      type: type,
       maxResults: 1,
     );
 
-    final member = _extractFirstPlace(data);
-    if (member == null) return null;
+    if (data.isEmpty) return null;
+    final member = data.first;
 
-    final name =
-    (member['name'] ?? member['station_name'] ?? '$destinationName Station')
-        .toString();
+    final fallbackName =
+    mode == PublicTransportMode.train ? '$destinationName Station' : 'Nearest bus stop';
 
-    final stationCode = member['station_code']?.toString();
-    final distanceMeters = _readDistanceMeters(member) ?? 0;
+    final name = (member['name'] ?? member['station_name'] ?? member['description'] ?? fallbackName)
+        .toString()
+        .trim();
+
+    final code = (member['station_code'] ?? member['atcocode'])?.toString();
 
     final lat = _readDouble(member, ['latitude', 'lat', 'y']);
     final lon = _readDouble(member, ['longitude', 'lon', 'lng', 'x']);
     final hasCoords = lat != null && lon != null;
 
-    return NearbyTrainInfo(
-      stationName: name,
-      distanceMeters: distanceMeters,
-      stationLatLng: hasCoords ? LatLng(lat!, lon!) : point,
+    return TransitAccessPoint(
+      name: name.isEmpty ? fallbackName : name,
+      distanceMeters: _readDistanceMeters(member) ?? 0,
+      latLng: hasCoords ? LatLng(lat!, lon!) : point,
       hasCoordinates: hasCoords,
-      stationCode: stationCode,
-      ticketUrl: _buildTrainTicketUrl(name),
+      code: code,
+      detailsUrl: mode == PublicTransportMode.train
+          ? _buildTrainTicketUrl(name.isEmpty ? fallbackName : name)
+          : _buildBusTimetableUrl(name.isEmpty ? fallbackName : name),
+      mode: mode,
     );
   }
 
-  Future<NearbyBusInfo?> _getNearbyBus({
-    required String destinationName,
-    required LatLng destination,
-  }) async {
-    final data = await _transportApi.searchNearbyPlaces(
-      latitude: destination.latitude,
-      longitude: destination.longitude,
-      type: 'bus_stop',
-      maxResults: 1,
-    );
+  PublicTransportMode? _chooseRecommendedMode(
+      TransitPairResult bus,
+      TransitPairResult train,
+      ) {
+    final busOk = _isUsablePair(bus);
+    final trainOk = _isUsablePair(train);
 
-    final member = _extractFirstPlace(data);
-    if (member == null) return null;
+    if (!busOk && !trainOk) return null;
+    if (busOk && !trainOk) return PublicTransportMode.bus;
+    if (trainOk && !busOk) return PublicTransportMode.train;
 
-    final stopName = (member['name'] ?? member['description'] ?? 'Bus journeys nearby').toString();
-    final distanceMeters = _readDistanceMeters(member) ?? 0;
+    final busScore = _scoreTransitPair(bus, PublicTransportMode.bus);
+    final trainScore = _scoreTransitPair(train, PublicTransportMode.train);
 
-    return NearbyBusInfo(
-      title: stopName.isEmpty ? 'Bus journeys nearby' : stopName,
-      distanceMeters: distanceMeters,
-      timetableUrl: _buildBusTimetableUrl(stopName.isEmpty ? destinationName : stopName),
-    );
+    return trainScore < busScore ? PublicTransportMode.train : PublicTransportMode.bus;
   }
 
-  Map<String, dynamic>? _extractFirstPlace(Map<String, dynamic> data) {
-    final members = data['member'];
-    if (members is List && members.isNotEmpty && members.first is Map<String, dynamic>) {
-      return members.first as Map<String, dynamic>;
+  bool _isUsablePair(TransitPairResult pair) {
+    if (!pair.hasBoth) return false;
+    final a = pair.fromOrigin!;
+    final b = pair.toDestination!;
+    if (a.name.trim().isEmpty || b.name.trim().isEmpty) return false;
+    if (_sameAccessPoint(a, b)) return false;
+    return true;
+  }
+
+  bool _sameAccessPoint(TransitAccessPoint a, TransitAccessPoint b) {
+    final ac = a.code?.trim();
+    final bc = b.code?.trim();
+    if (ac != null && bc != null && ac.isNotEmpty && bc.isNotEmpty) {
+      return ac.toLowerCase() == bc.toLowerCase();
     }
 
-    final results = data['results'];
-    if (results is List && results.isNotEmpty && results.first is Map<String, dynamic>) {
-      return results.first as Map<String, dynamic>;
+    String norm(String s) => s.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+    return norm(a.name) == norm(b.name);
+  }
+
+  double _scoreTransitPair(TransitPairResult pair, PublicTransportMode mode) {
+    final access = pair.accessDistanceMeters ?? 999999;
+    final line = pair.lineDistanceMeters ?? 999999;
+
+    var score = access + line;
+
+    if (mode == PublicTransportMode.train) {
+      if (line >= 12000) score -= 2500;
+      if (access > 2500) score += 1500;
+    } else {
+      if (line >= 12000) score += 3000;
+      if (access <= 800) score -= 800;
     }
 
-    return null;
+    return score;
+  }
+
+  FareEstimate? _estimateFareForMode(
+      PublicTransportMode? mode,
+      TransitPairResult pair,
+      ) {
+    if (mode == null || !_isUsablePair(pair)) return null;
+    return mode == PublicTransportMode.train ? _estimateTrainFare(pair) : _estimateBusFare(pair);
+  }
+
+  FareEstimate _estimateTrainFare(TransitPairResult pair) {
+    final lineMeters = pair.lineDistanceMeters ?? 0;
+    final km = lineMeters / 1000.0;
+
+    if (km <= 5) {
+      return const FareEstimate(min: 2.80, max: 6.50, label: 'Estimated train fare');
+    }
+    if (km <= 20) {
+      return const FareEstimate(min: 5.20, max: 12.90, label: 'Estimated train fare');
+    }
+    if (km <= 60) {
+      return const FareEstimate(min: 9.50, max: 24.50, label: 'Estimated train fare');
+    }
+    if (km <= 120) {
+      return const FareEstimate(min: 16.00, max: 42.00, label: 'Estimated train fare');
+    }
+    return const FareEstimate(min: 24.00, max: 75.00, label: 'Estimated train fare');
+  }
+
+  FareEstimate _estimateBusFare(TransitPairResult pair) {
+    final lineMeters = pair.lineDistanceMeters ?? 0;
+    final km = lineMeters / 1000.0;
+
+    if (km <= 3) {
+      return const FareEstimate(min: 1.80, max: 2.50, label: 'Estimated bus fare');
+    }
+    if (km <= 8) {
+      return const FareEstimate(min: 2.00, max: 3.50, label: 'Estimated bus fare');
+    }
+    if (km <= 20) {
+      return const FareEstimate(min: 2.50, max: 5.50, label: 'Estimated bus fare');
+    }
+    return const FareEstimate(min: 4.00, max: 8.50, label: 'Estimated bus fare');
   }
 
   double? _readDistanceMeters(Map<String, dynamic> item) {

@@ -1,10 +1,10 @@
-// lib/screens/routes/route_options_screen.dart
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../features/routes/route_option.dart';
 import '../../services/routeservice.dart';
+
 
 class RouteOptionsScreen extends StatefulWidget {
   final String destinationName;
@@ -166,8 +166,10 @@ class _RouteOptionCard extends StatelessWidget {
   }
 
   String _formatDistance(double meters) {
-    final km = meters / 1000;
-    return '${km.toStringAsFixed(1)} km';
+    if (meters >= 1000) {
+      return '${(meters / 1000).toStringAsFixed(1)} km';
+    }
+    return '${meters.toStringAsFixed(0)} m';
   }
 
   bool _shouldShowTime(RouteOption option) {
@@ -181,21 +183,22 @@ class _RouteOptionCard extends StatelessWidget {
     double minFare;
     double maxFare;
 
-    if (km <= 2) {
-      minFare = 1.20;
-      maxFare = 2.00;
-    } else if (km <= 5) {
+    if (km <= 3) {
       minFare = 1.80;
+      maxFare = 2.50;
+    } else if (km <= 8) {
+      minFare = 2.00;
       maxFare = 3.50;
-    } else {
+    } else if (km <= 20) {
       minFare = 2.50;
-      maxFare = 4.60;
+      maxFare = 5.50;
+    } else {
+      minFare = 4.00;
+      maxFare = 8.50;
     }
 
     return '£${minFare.toStringAsFixed(2)}–£${maxFare.toStringAsFixed(2)}';
   }
-
-  // inside _RouteOptionCard
 
   String _formatCost(RouteOption option) {
     if (option.costText != null && option.costText!.trim().isNotEmpty) {
@@ -207,7 +210,6 @@ class _RouteOptionCard extends StatelessWidget {
     }
 
     if (option.mode.toLowerCase() == 'public transport') {
-      // fallback heuristic for bus or unknown
       return _formatPublicTransportFareRange(option.distanceMeters);
     }
 
@@ -225,6 +227,7 @@ class _RouteOptionCard extends StatelessWidget {
     const primaryText = Color(0xFF1F1F1F);
     const secondaryText = Color(0xFF6B6E6A);
     const accent = Color(0xFF9FC8B2);
+    const featuredAccent = Color(0xFFE8F3EC);
     const border = Color(0xFFE3E4DE);
 
     final showTime = _shouldShowTime(option);
@@ -233,6 +236,7 @@ class _RouteOptionCard extends StatelessWidget {
       if (showTime) Metric(label: 'Time', value: '${option.durationMinutes} min'),
       Metric(label: 'Cost', value: _formatCost(option)),
       Metric(label: 'CO₂', value: '${option.co2Kg.toStringAsFixed(2)} kg'),
+      Metric(label: 'Distance', value: _formatDistance(option.distanceMeters)),
     ];
 
     final actions = <RouteOptionAction>[
@@ -241,25 +245,38 @@ class _RouteOptionCard extends StatelessWidget {
     ];
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(option.isFeatured ? 20 : 16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.55),
-        border: Border.all(color: border),
-        borderRadius: BorderRadius.circular(20),
+        color: option.isFeatured ? featuredAccent : Colors.white.withOpacity(0.55),
+        border: Border.all(color: border, width: option.isFeatured ? 1.4 : 1),
+        borderRadius: BorderRadius.circular(option.isFeatured ? 24 : 20),
+        boxShadow: option.isFeatured
+            ? const [
+          BoxShadow(
+            blurRadius: 16,
+            offset: Offset(0, 6),
+            color: Color(0x12000000),
+          ),
+        ]
+            : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(_iconForMode(option.mode), color: primaryText),
+              Icon(
+                _iconForMode(option.mode),
+                color: primaryText,
+                size: option.isFeatured ? 26 : 24,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   option.mode,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w400,
+                  style: TextStyle(
+                    fontSize: option.isFeatured ? 20 : 18,
+                    fontWeight: FontWeight.w500,
                     color: primaryText,
                   ),
                 ),
@@ -267,37 +284,44 @@ class _RouteOptionCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: accent.withOpacity(0.22),
+                  color: accent.withOpacity(option.isFeatured ? 0.32 : 0.22),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   option.tag,
                   style: const TextStyle(
                     fontSize: 12,
-                    fontWeight: FontWeight.w400,
+                    fontWeight: FontWeight.w500,
                     color: primaryText,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Row(
-            children: metrics.map((m) => Expanded(child: m)).toList(growable: false),
+          SizedBox(height: option.isFeatured ? 18 : 14),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: metrics
+                .map(
+                  (m) => SizedBox(
+                width: option.isFeatured ? 140 : 120,
+                child: m,
+              ),
+            )
+                .toList(growable: false),
           ),
-          const SizedBox(height: 10),
-          Metric(label: 'Distance', value: _formatDistance(option.distanceMeters)),
-          const SizedBox(height: 12),
+          SizedBox(height: option.isFeatured ? 16 : 12),
           Text(
             option.description,
-            style: const TextStyle(
-              fontSize: 14,
+            style: TextStyle(
+              fontSize: option.isFeatured ? 15 : 14,
               fontWeight: FontWeight.w400,
               color: secondaryText,
-              height: 1.35,
+              height: 1.45,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Text(
             option.source,
             style: const TextStyle(
@@ -307,19 +331,19 @@ class _RouteOptionCard extends StatelessWidget {
             ),
           ),
           if (actions.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Wrap(
               spacing: 10,
               runSpacing: 10,
               children: actions
                   .map(
                     (a) => SizedBox(
-                  height: 36,
+                  height: 38,
                   child: OutlinedButton(
                     onPressed: () => _launchExternal(a.uri),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: primaryText,
-                      side: BorderSide(color: border),
+                      side: const BorderSide(color: border),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(999),
                       ),
@@ -328,7 +352,7 @@ class _RouteOptionCard extends StatelessWidget {
                       a.label,
                       style: const TextStyle(
                         fontSize: 13,
-                        fontWeight: FontWeight.w400,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),
@@ -374,7 +398,7 @@ class Metric extends StatelessWidget {
           value,
           style: const TextStyle(
             fontSize: 15,
-            fontWeight: FontWeight.w400,
+            fontWeight: FontWeight.w500,
             color: primaryText,
           ),
         ),

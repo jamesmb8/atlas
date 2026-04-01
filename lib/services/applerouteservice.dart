@@ -11,50 +11,51 @@ class AppleRouteResult {
   });
 }
 
-
 class AppleRouteService {
   const AppleRouteService();
 
   static const MethodChannel _channel =
-  MethodChannel('com.james.atlas/apple_route');
+  MethodChannel('atlas/mapkit_directions');
 
   Future<AppleRouteResult?> getWalkingRoute({
     required LatLng origin,
     required LatLng destination,
-  }) async {
+  }) {
     return _getRoute(
       origin: origin,
       destination: destination,
-      transportType: 'walking',
+      transport: 'walking',
     );
   }
 
   Future<AppleRouteResult?> getDrivingRoute({
     required LatLng origin,
     required LatLng destination,
-  }) async {
+  }) {
     return _getRoute(
       origin: origin,
       destination: destination,
-      transportType: 'driving',
+      transport: 'automobile',
     );
   }
 
   Future<AppleRouteResult?> _getRoute({
     required LatLng origin,
     required LatLng destination,
-    required String transportType,
+    required String transport,
   }) async {
     try {
-      final result = await _channel.invokeMethod<dynamic>('getRoute', {
+      final result = await _channel.invokeMethod<dynamic>('summary', {
         'originLat': origin.latitude,
         'originLng': origin.longitude,
-        'destinationLat': destination.latitude,
-        'destinationLng': destination.longitude,
-        'transportType': transportType,
+        'destLat': destination.latitude,
+        'destLng': destination.longitude,
+        'transport': transport,
       });
 
-      if (result == null) return null;
+      if (result == null) {
+        return null;
+      }
 
       final map = Map<dynamic, dynamic>.from(result as Map);
 

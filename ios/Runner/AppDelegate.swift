@@ -1,15 +1,12 @@
+// ios/Runner/AppDelegate.swift
 import UIKit
 import Flutter
 import MapKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
-
-  // Existing search channel
   private let searchChannelName = "atlas/mapkit_search"
-
-  // New route channel
-  private let routeChannelName = "com.james.atlas/apple_route"
+  private let routeChannelName = "atlas/mapkit_directions"
 
   private let completer = MKLocalSearchCompleter()
   private var autocompleteContinuation: CheckedContinuation<[[String: Any]], Error>?
@@ -18,16 +15,13 @@ import MapKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-
     let controller = window?.rootViewController as! FlutterViewController
 
-    // Search channel
     let searchChannel = FlutterMethodChannel(
       name: searchChannelName,
       binaryMessenger: controller.binaryMessenger
     )
 
-    // Route channel
     let routeChannel = FlutterMethodChannel(
       name: routeChannelName,
       binaryMessenger: controller.binaryMessenger
@@ -40,7 +34,6 @@ import MapKit
       guard let self = self else { return }
 
       switch call.method {
-
       case "autocomplete":
         guard
           let args = call.arguments as? [String: Any],
@@ -87,15 +80,14 @@ import MapKit
       guard let self = self else { return }
 
       switch call.method {
-
-      case "getRoute":
+      case "route":
         guard
           let args = call.arguments as? [String: Any],
           let originLat = args["originLat"] as? CLLocationDegrees,
           let originLng = args["originLng"] as? CLLocationDegrees,
-          let destinationLat = args["destinationLat"] as? CLLocationDegrees,
-          let destinationLng = args["destinationLng"] as? CLLocationDegrees,
-          let transportTypeRaw = args["transportType"] as? String
+          let destLat = args["destLat"] as? CLLocationDegrees,
+          let destLng = args["destLng"] as? CLLocationDegrees,
+          let transportRaw = args["transport"] as? String
         else {
           result(FlutterError(code: "bad_args", message: "Missing route arguments", details: nil))
           return
@@ -103,16 +95,44 @@ import MapKit
 
         Task {
           do {
-            let route = try await self.getRoute(
+            let points = try await self.routePolyline(
               originLat: originLat,
               originLng: originLng,
-              destinationLat: destinationLat,
-              destinationLng: destinationLng,
-              transportTypeRaw: transportTypeRaw
+              destLat: destLat,
+              destLng: destLng,
+              transportRaw: transportRaw
             )
-            result(route)
+            result(points)
           } catch {
             result(FlutterError(code: "route_failed", message: "\(error)", details: nil))
+          }
+        }
+
+      case "summary":
+        guard
+          let args = call.arguments as? [String: Any],
+          let originLat = args["originLat"] as? CLLocationDegrees,
+          let originLng = args["originLng"] as? CLLocationDegrees,
+          let destLat = args["destLat"] as? CLLocationDegrees,
+          let destLng = args["destLng"] as? CLLocationDegrees,
+          let transportRaw = args["transport"] as? String
+        else {
+          result(FlutterError(code: "bad_args", message: "Missing summary arguments", details: nil))
+          return
+        }
+
+        Task {
+          do {
+            let summary = try await self.routeSummary(
+              originLat: originLat,
+              originLng: originLng,
+              destLat: destLat,
+              destLng: destLng,
+              transportRaw: transportRaw
+            )
+            result(summary)
+          } catch {
+            result(FlutterError(code: "summary_failed", message: "\(error)", details: nil))
           }
         }
 
@@ -160,47 +180,59 @@ import MapKit
     }
 
     return [
-      "title": title,
+      "title": item.name ?? title,
       "subtitle": subtitle,
       "lat": coord.latitude,
       "lng": coord.longitude
     ]
   }
 
-  private func getRoute(
+  private func makeDirectionsRequest(
     originLat: CLLocationDegrees,
     originLng: CLLocationDegrees,
-    destinationLat: CLLocationDegrees,
-    destinationLng: CLLocationDegrees,
-    transportTypeRaw: String
-  ) async throws -> [String: Any] {
-
+    destLat: CLLocationDegrees,
+    destLng: CLLocationDegrees,
+    transportRaw: String
+  ) -> MKDirections.Request {
     let sourcePlacemark = MKPlacemark(
       coordinate: CLLocationCoordinate2D(latitude: originLat, longitude: originLng)
     )
     let destinationPlacemark = MKPlacemark(
-      coordinate: CLLocationCoordinate2D(latitude: destinationLat, longitude: destinationLng)
+      coordinate: CLLocationCoordinate2D(latitude: destLat, longitude: destLng)
     )
 
     let request = MKDirections.Request()
     request.source = MKMapItem(placemark: sourcePlacemark)
     request.destination = MKMapItem(placemark: destinationPlacemark)
 
-    switch transportTypeRaw.lowercased() {
+    switch transportRaw.lowercased() {
     case "walking":
       request.transportType = .walking
-    case "driving":
+    case "automobile", "driving":
       request.transportType = .automobile
     default:
-      throw NSError(
-        domain: "atlas",
-        code: 3,
-        userInfo: [NSLocalizedDescriptionKey: "Unsupported transport type: \(transportTypeRaw)"]
-      )
+      request.transportType = .automobile
     }
 
-    let directions = MKDirections(request: request)
-    let response = try await directions.calculate()
+    return request
+  }
+
+  private func routePolyline(
+    originLat: CLLocationDegrees,
+    originLng: CLLocationDegrees,
+    destLat: CLLocationDegrees,
+    destLng: CLLocationDegrees,
+    transportRaw: String
+  ) async throws -> [[String: Double]] {
+    let request = makeDirectionsRequest(
+      originLat: originLat,
+      originLng: originLng,
+      destLat: destLat,
+      destLng: destLng,
+      transportRaw: transportRaw
+    )
+
+    let response = try await MKDirections(request: request).calculate()
 
     guard let route = response.routes.first else {
       throw NSError(
@@ -210,21 +242,61 @@ import MapKit
       )
     }
 
-    let durationMinutes = Int((route.expectedTravelTime / 60.0).rounded())
+    let polyline = route.polyline
+    let pointCount = polyline.pointCount
+    var coords = Array(
+      repeating: CLLocationCoordinate2D(latitude: 0, longitude: 0),
+      count: pointCount
+    )
+
+    polyline.getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
+
+    return coords.map { coordinate in
+      [
+        "lat": coordinate.latitude,
+        "lng": coordinate.longitude
+      ]
+    }
+  }
+
+  private func routeSummary(
+    originLat: CLLocationDegrees,
+    originLng: CLLocationDegrees,
+    destLat: CLLocationDegrees,
+    destLng: CLLocationDegrees,
+    transportRaw: String
+  ) async throws -> [String: Any] {
+    let request = makeDirectionsRequest(
+      originLat: originLat,
+      originLng: originLng,
+      destLat: destLat,
+      destLng: destLng,
+      transportRaw: transportRaw
+    )
+
+    let response = try await MKDirections(request: request).calculate()
+
+    guard let route = response.routes.first else {
+      throw NSError(
+        domain: "atlas",
+        code: 5,
+        userInfo: [NSLocalizedDescriptionKey: "No route summary found"]
+      )
+    }
 
     return [
       "distanceMeters": route.distance,
-      "durationMinutes": durationMinutes
+      "durationMinutes": Int((route.expectedTravelTime / 60.0).rounded())
     ]
   }
 }
 
 extension AppDelegate: MKLocalSearchCompleterDelegate {
   func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
-    let items = completer.results.prefix(12).map { r in
-      return [
-        "title": r.title,
-        "subtitle": r.subtitle
+    let items = completer.results.prefix(12).map { result in
+      [
+        "title": result.title,
+        "subtitle": result.subtitle
       ]
     }
 
