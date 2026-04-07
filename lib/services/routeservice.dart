@@ -1,4 +1,3 @@
-// lib/services/routeservice.dart
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 
 import '../features/routes/route_option.dart';
@@ -44,101 +43,85 @@ class RouteOptionsService {
       destination: destination,
     );
 
-    if (transport.hasAnyData) {
-      final recommended = transport.recommended;
-      final alternative = transport.alternative;
+    print(
+      'Transport summary => '
+          'bus:${transport.bus != null}, '
+          'train:${transport.train != null}, '
+          'recommended:${transport.recommendedMode}, '
+          'debug:${transport.debugReason}',
+    );
 
-      if (recommended != null) {
-        final fare = transport.recommendedFare;
-        final isTrain = recommended.mode == PublicTransportMode.train;
-        final accessDistance = recommended.accessDistanceMeters ?? 0;
-        final lineDistance = recommended.lineDistanceMeters ?? 0;
-        final totalDistance =
-            recommended.totalJourneyDistanceMeters ?? (accessDistance + lineDistance);
-        final from = recommended.fromOrigin!;
-        final to = recommended.toDestination!;
+    final recommended = transport.recommended;
+    final alternative = transport.alternative;
 
-        final descriptionLines = <String>[
-          isTrain ? 'Recommended rail route' : 'Recommended bus route',
-          '',
-          'Start access',
-          '• Nearest ${isTrain ? 'station' : 'stop'}: ${from.name}',
-          '• Walk from start: ${_formatMeters(from.distanceMeters)}',
-          '',
-          'End access',
-          '• Nearest ${isTrain ? 'station' : 'stop'}: ${to.name}',
-          '• Walk to destination: ${_formatMeters(to.distanceMeters)}',
-          '',
-          '${isTrain ? 'Rail' : 'Transit'} segment: ${_formatMeters(lineDistance)}',
-          'Access walking total: ${_formatMeters(accessDistance)}',
-        ];
+    if (recommended != null) {
+      final fare = transport.recommendedFare;
+      final isTrain = recommended.mode == PublicTransportMode.train;
+      final totalDistance =
+          recommended.totalJourneyDistanceMeters ??
+              (recommended.accessDistanceMeters ?? 0);
 
-        options.add(
-          RouteOption(
-            mode: 'Public Transport',
-            tag: isTrain ? 'Train recommended' : 'Bus recommended',
-            durationMinutes: 0,
-            distanceMeters: totalDistance,
-            estimatedCost: null,
-            costText: fare?.formatted,
-            co2Kg: _co2Service.publicTransportKg(totalDistance),
-            description: descriptionLines.join('\n'),
-            source: 'Atlas transport info',
-            isFeatured: true,
-            sortPriority: 0,
-            primaryAction: RouteOptionAction(
-              label: isTrain ? 'Tickets' : 'Timetable',
-              uri: Uri.parse(from.detailsUrl),
-            ),
-            secondaryAction: alternative != null
-                ? RouteOptionAction(
-              label: alternative.mode == PublicTransportMode.train
-                  ? 'See train alternative'
-                  : 'See bus alternative',
-              uri: Uri.parse(alternative.fromOrigin!.detailsUrl),
-            )
-                : null,
+      options.add(
+        RouteOption(
+          mode: 'Public Transport',
+          tag: isTrain ? 'Train recommended' : 'Bus recommended',
+          durationMinutes: 0,
+          distanceMeters: totalDistance,
+          estimatedCost: null,
+          costText: fare?.formatted,
+          co2Kg: _co2Service.publicTransportKg(totalDistance),
+          description: _buildTransitDescription(
+            pair: recommended,
+            title: isTrain ? 'Recommended rail route' : 'Recommended bus route',
           ),
-        );
-      }
-
-      if (alternative != null) {
-        final fare = transport.alternativeFare;
-        final isTrain = alternative.mode == PublicTransportMode.train;
-        final accessDistance = alternative.accessDistanceMeters ?? 0;
-        final lineDistance = alternative.lineDistanceMeters ?? 0;
-        final totalDistance =
-            alternative.totalJourneyDistanceMeters ?? (accessDistance + lineDistance);
-        final from = alternative.fromOrigin!;
-        final to = alternative.toDestination!;
-
-        final descriptionLines = <String>[
-          isTrain ? 'Alternative rail route' : 'Alternative bus route',
-          'Start → ${from.name}: ${_formatMeters(from.distanceMeters)}',
-          'Destination → ${to.name}: ${_formatMeters(to.distanceMeters)}',
-          '${isTrain ? 'Rail' : 'Transit'} segment: ${_formatMeters(lineDistance)}',
-        ];
-
-        options.add(
-          RouteOption(
-            mode: 'Public Transport',
-            tag: isTrain ? 'Train alternative' : 'Bus alternative',
-            durationMinutes: 0,
-            distanceMeters: totalDistance,
-            estimatedCost: null,
-            costText: fare?.formatted,
-            co2Kg: _co2Service.publicTransportKg(totalDistance),
-            description: descriptionLines.join('\n'),
-            source: 'Atlas transport info',
-            isFeatured: false,
-            sortPriority: 1,
-            primaryAction: RouteOptionAction(
-              label: isTrain ? 'Tickets' : 'Timetable',
-              uri: Uri.parse(from.detailsUrl),
-            ),
+          source: 'Atlas transport info',
+          isFeatured: true,
+          sortPriority: 0,
+          primaryAction: RouteOptionAction(
+            label: isTrain ? 'Tickets' : 'Timetable',
+            uri: Uri.parse(recommended.fromOrigin!.detailsUrl),
           ),
-        );
-      }
+          secondaryAction: alternative != null
+              ? RouteOptionAction(
+            label: alternative.mode == PublicTransportMode.train
+                ? 'See train alternative'
+                : 'See bus alternative',
+            uri: Uri.parse(alternative.fromOrigin!.detailsUrl),
+          )
+              : null,
+        ),
+      );
+    }
+
+    if (alternative != null) {
+      final fare = transport.alternativeFare;
+      final isTrain = alternative.mode == PublicTransportMode.train;
+      final totalDistance =
+          alternative.totalJourneyDistanceMeters ??
+              (alternative.accessDistanceMeters ?? 0);
+
+      options.add(
+        RouteOption(
+          mode: 'Public Transport',
+          tag: isTrain ? 'Train alternative' : 'Bus alternative',
+          durationMinutes: 0,
+          distanceMeters: totalDistance,
+          estimatedCost: null,
+          costText: fare?.formatted,
+          co2Kg: _co2Service.publicTransportKg(totalDistance),
+          description: _buildTransitDescription(
+            pair: alternative,
+            title: isTrain ? 'Alternative rail route' : 'Alternative bus route',
+          ),
+          source: 'Atlas transport info',
+          isFeatured: false,
+          sortPriority: 1,
+          primaryAction: RouteOptionAction(
+            label: isTrain ? 'Tickets' : 'Timetable',
+            uri: Uri.parse(alternative.fromOrigin!.detailsUrl),
+          ),
+        ),
+      );
     }
 
     if (driving != null) {
@@ -189,10 +172,70 @@ class RouteOptionsService {
     return options;
   }
 
-  String _formatMeters(double meters) {
-    if (meters >= 1000) {
-      return '${(meters / 1000).toStringAsFixed(1)} km';
+  String _buildTransitDescription({
+    required TransitPairResult pair,
+    required String title,
+  }) {
+    final plan = pair.journeyPlan;
+    final isTrain = pair.mode == PublicTransportMode.train;
+    final lines = <String>[title];
+
+    if (plan != null && plan.hasLegs) {
+      lines.add('');
+      lines.add(plan.compactSummary);
+      lines.add('');
+
+      for (final leg in plan.legs) {
+        switch (leg.type) {
+          case TransitLegType.walk:
+            lines.add('• Walk ${_formatMeters(leg.distanceMeters)}');
+            break;
+          case TransitLegType.bus:
+          case TransitLegType.train:
+            final from = _stopDisplay(leg.fromStopName, leg.fromStopCode);
+            final to = _stopDisplay(leg.toStopName, leg.toStopCode);
+            if (from.isNotEmpty && to.isNotEmpty) {
+              lines.add('• ${leg.label}: $from → $to');
+            } else {
+              lines.add('• ${leg.label}');
+            }
+            break;
+        }
+      }
+
+      lines.add('');
+      lines.add('Walking total: ${_formatMeters(plan.totalWalkingDistanceMeters)}');
+      lines.add('${isTrain ? 'Rail' : 'Transit'} total: ${_formatMeters(plan.totalTransitDistanceMeters)}');
+      return lines.join('\n');
     }
+
+    final from = pair.fromOrigin;
+    final to = pair.toDestination;
+
+    if (from != null) {
+      lines.add('');
+      lines.add('• Board at: ${from.displayNameWithCode}');
+      lines.add('• Walk to start: ${_formatMeters(from.distanceMeters)}');
+    }
+
+    if (to != null) {
+      lines.add('• Get off at: ${to.displayNameWithCode}');
+      lines.add('• Walk to destination: ${_formatMeters(to.distanceMeters)}');
+    }
+
+    return lines.join('\n');
+  }
+
+  String _stopDisplay(String? name, String? code) {
+    final n = (name ?? '').trim();
+    final c = (code ?? '').trim();
+    if (n.isEmpty) return '';
+    if (c.isEmpty) return n;
+    return '$n ($c)';
+  }
+
+  String _formatMeters(double meters) {
+    if (meters >= 1000) return '${(meters / 1000).toStringAsFixed(1)} km';
     return '${meters.toStringAsFixed(0)} m';
   }
 }

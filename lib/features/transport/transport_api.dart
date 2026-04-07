@@ -1,4 +1,6 @@
+// lib/features/transport/transport_api.dart
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 
 class TransportApi {
@@ -14,18 +16,27 @@ class TransportApi {
 
   static const String _baseUrl = 'https://transportapi.com/v3/uk';
 
-  Future<Map<String, dynamic>> searchNearbyPlaces({
-    required double latitude,
-    required double longitude,
-    required String type,
-    int maxResults = 5,
+  Future<Map<String, dynamic>> publicJourney({
+    required double fromLat,
+    required double fromLon,
+    required double toLat,
+    required double toLon,
+    DateTime? dateTime,
+    String service = 'traveline',
+    bool groupByRoute = true,
+    bool showCallingPoints = false,
   }) async {
-    final uri = Uri.parse('$_baseUrl/places.json').replace(
+    final when = (dateTime ?? DateTime.now()).toLocal();
+
+    final uri = Uri.parse('$_baseUrl/public_journey.json').replace(
       queryParameters: {
-        'lat': latitude.toString(),
-        'lon': longitude.toString(),
-        'type': type,
-        'max_results': maxResults.toString(),
+        'from': _toLonLat(fromLon, fromLat),
+        'to': _toLonLat(toLon, toLat),
+        'date': _formatDate(when),
+        'time': _formatTime(when),
+        'service': service,
+        'group_by_route': groupByRoute.toString(),
+        'show_calling_points': showCallingPoints.toString(),
         'app_id': appId,
         'app_key': appKey,
       },
@@ -35,36 +46,27 @@ class TransportApi {
 
     if (response.statusCode != 200) {
       throw Exception(
-        'TransportAPI places request failed (${response.statusCode}): ${response.body}',
+        'TransportAPI public_journey request failed (${response.statusCode}): ${response.body}',
       );
     }
 
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
-  Future<List<Map<String, dynamic>>> searchNearbyPlacesList({
-    required double latitude,
-    required double longitude,
-    required String type,
-    int maxResults = 5,
-  }) async {
-    final decoded = await searchNearbyPlaces(
-      latitude: latitude,
-      longitude: longitude,
-      type: type,
-      maxResults: maxResults,
-    );
+  String _toLonLat(double lon, double lat) {
+    return 'lonlat:$lon,$lat';
+  }
 
-    final members = decoded['member'];
-    if (members is List) {
-      return members.whereType<Map<String, dynamic>>().toList(growable: false);
-    }
+  String _formatDate(DateTime value) {
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
 
-    final results = decoded['results'];
-    if (results is List) {
-      return results.whereType<Map<String, dynamic>>().toList(growable: false);
-    }
-
-    return const [];
+  String _formatTime(DateTime value) {
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
   }
 }
