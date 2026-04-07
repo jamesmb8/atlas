@@ -85,10 +85,7 @@ class TransitJourneyLeg {
         return (code != null && code.isNotEmpty) ? 'Bus $code' : 'Bus';
       case TransitLegType.train:
         final code = routeCode?.trim();
-        if (code != null &&
-            code.isNotEmpty &&
-            !RegExp(r'^\d{5,}$').hasMatch(code) &&
-            code.length <= 5) {
+        if (code != null && code.isNotEmpty && !RegExp(r'^\d{5,}$').hasMatch(code)) {
           return 'Train $code';
         }
         return 'Train';
@@ -523,6 +520,8 @@ class PublicTransportResult {
 }
 
 class TransitRouteService {
+  static const bool _debugLoggingEnabled = false;
+
   final TransportApi _transportApi;
 
   TransitRouteService({TransportApi? transportApi})
@@ -533,8 +532,8 @@ class TransitRouteService {
       );
 
   bool get _hasApiCredentials =>
-      transportApiAppId.trim().isNotEmpty &&
-          transportApiAppKey.trim().isNotEmpty;
+      _transportApi.appId.trim().isNotEmpty &&
+          _transportApi.appKey.trim().isNotEmpty;
 
   Future<PublicTransportResult> getPublicTransportSummary({
     required String destinationName,
@@ -564,7 +563,10 @@ class TransitRouteService {
         toLat: destination.latitude,
         toLon: destination.longitude,
         dateTime: departureTime,
+        groupByRoute: false,
       );
+
+      _debugDumpTransportApiRoutes(journeyData);
     } catch (e) {
       debugReason = 'public_journey failed: $e';
     }
@@ -628,6 +630,8 @@ class TransitRouteService {
         'No usable public transport result returned',
       );
     }
+
+    _debugDumpParsedJourneyOptions(journeyOptions);
 
     return PublicTransportResult(
       bus: bus,
@@ -700,9 +704,14 @@ class TransitRouteService {
   }
 
   int _compareJourneyOptions(TransitJourneyOption a, TransitJourneyOption b) {
+    final durationCompare =
+    a.plan.effectiveDurationMinutes.compareTo(b.plan.effectiveDurationMinutes);
+    if (durationCompare != 0) {
+      return durationCompare;
+    }
+
     final aDeparture = a.plan.departureTime;
     final bDeparture = b.plan.departureTime;
-
     if (aDeparture != null && bDeparture != null) {
       final departureCompare = aDeparture.compareTo(bDeparture);
       if (departureCompare != 0) {
@@ -710,15 +719,8 @@ class TransitRouteService {
       }
     }
 
-    final durationCompare =
-    a.plan.effectiveDurationMinutes.compareTo(b.plan.effectiveDurationMinutes);
-    if (durationCompare != 0) {
-      return durationCompare;
-    }
-
     final aArrival = a.plan.arrivalTime;
     final bArrival = b.plan.arrivalTime;
-
     if (aArrival != null && bArrival != null) {
       final arrivalCompare = aArrival.compareTo(bArrival);
       if (arrivalCompare != 0) {
@@ -741,9 +743,7 @@ class TransitRouteService {
     return a.score.compareTo(b.score);
   }
 
-  List<TransitJourneyOption> _applyJourneyTags(
-      List<TransitJourneyOption> options,
-      ) {
+  List<TransitJourneyOption> _applyJourneyTags(List<TransitJourneyOption> options) {
     if (options.isEmpty) {
       return const [];
     }
@@ -856,13 +856,11 @@ class TransitRouteService {
         continue;
       }
 
-      final servedLines = <String>[
-        if (_nullIfBlank(firstTransit.routeCode) != null)
-          firstTransit.routeCode!.trim(),
-        if (_nullIfBlank(lastTransit.routeCode) != null &&
-            lastTransit.routeCode!.trim() != firstTransit.routeCode?.trim())
-          lastTransit.routeCode!.trim(),
-      ];
+      final servedLines = transitLegs
+          .map((leg) => _nullIfBlank(leg.routeCode))
+          .whereType<String>()
+          .toSet()
+          .toList(growable: false);
 
       final fromPoint = TransitAccessPoint(
         name: fromName,
@@ -931,17 +929,18 @@ class TransitRouteService {
         const ['mode', 'type', 'travel_mode', 'transport_mode'],
       ).toLowerCase();
 
+      final parsedType = _looksLikeWalk(modeText)
+          ? TransitLegType.walk
+          : (_looksLikeTrain(modeText, part)
+          ? TransitLegType.train
+          : TransitLegType.bus);
+
       final distanceMeters = _readDistanceMeters(part) ?? 0.0;
-      final durationMinutes =
-          _readDurationMinutes(part) ??
-              _estimateLegDurationMinutes(
-                type: _looksLikeWalk(modeText)
-                    ? TransitLegType.walk
-                    : (_looksLikeTrain(modeText, part)
-                    ? TransitLegType.train
-                    : TransitLegType.bus),
-                distanceMeters: distanceMeters,
-              );
+      final durationMinutes = _readDurationMinutes(part) ??
+          _estimateLegDurationMinutes(
+            type: parsedType,
+            distanceMeters: distanceMeters,
+          );
 
       if (_looksLikeWalk(modeText)) {
         legs.add(
@@ -1079,11 +1078,9 @@ class TransitRouteService {
       return null;
     }
 
-    final mode = sawTrain && !sawBus
+    final mode = sawTrain
         ? PublicTransportMode.train
-        : sawBus && !sawTrain
-        ? PublicTransportMode.bus
-        : _dominantJourneyMode(legs);
+        : (sawBus ? PublicTransportMode.bus : _dominantJourneyMode(legs));
 
     final departureTime = _readRouteDepartureTime(route, rawParts);
     final arrivalTime = _readRouteArrivalTime(route, rawParts);
@@ -1465,10 +1462,12 @@ class TransitRouteService {
     final toOptions =
     identification == null ? null : _asMap(identification['to_options']);
 
-    final fromError =
-    fromOptions == null ? null : _nullIfBlank(_readFirstString(fromOptions, const ['error']));
-    final toError =
-    toOptions == null ? null : _nullIfBlank(_readFirstString(toOptions, const ['error']));
+    final fromError = fromOptions == null
+        ? null
+        : _nullIfBlank(_readFirstString(fromOptions, const ['error']));
+    final toError = toOptions == null
+        ? null
+        : _nullIfBlank(_readFirstString(toOptions, const ['error']));
 
     if (fromError != null || toError != null) {
       return 'Journey planner could not resolve from/to: '
@@ -1527,7 +1526,12 @@ class TransitRouteService {
     ];
 
     for (final key in keys) {
-      final parsed = _parseDurationValue(item[key]);
+      final value = item[key];
+      if (key == 'duration' && value is Map) {
+        break;
+      }
+
+      final parsed = _parseDurationValue(value);
       if (parsed != null) {
         return parsed;
       }
@@ -1535,11 +1539,38 @@ class TransitRouteService {
 
     final durationMap = _asMap(item['duration']);
     if (durationMap != null) {
-      for (final key in const ['minutes', 'mins', 'seconds', 'value']) {
-        final parsed = _parseDurationValue(durationMap[key]);
+      final minutes = durationMap['minutes'] ?? durationMap['mins'];
+      final seconds = durationMap['seconds'];
+      final value = durationMap['value'];
+      final unit = _readFirstString(durationMap, const ['unit', 'units']).toLowerCase();
+
+      if (minutes != null) {
+        final parsed = _parseDurationNumber(minutes, isSeconds: false);
         if (parsed != null) {
           return parsed;
         }
+      }
+
+      if (seconds != null) {
+        final parsed = _parseDurationNumber(seconds, isSeconds: true);
+        if (parsed != null) {
+          return parsed;
+        }
+      }
+
+      if (value != null && unit.isNotEmpty) {
+        final parsed = _parseDurationNumber(
+          value,
+          isSeconds: unit.contains('sec'),
+        );
+        if (parsed != null) {
+          return parsed;
+        }
+      }
+
+      final parsed = _parseDurationValue(value);
+      if (parsed != null) {
+        return parsed;
       }
     }
 
@@ -1547,6 +1578,26 @@ class TransitRouteService {
     final arrival = _tryParseDateTime(item['arrival_time'] ?? item['arrive_at']);
     if (departure != null && arrival != null && arrival.isAfter(departure)) {
       return arrival.difference(departure).inMinutes;
+    }
+
+    return null;
+  }
+
+  int? _parseDurationNumber(dynamic value, {required bool isSeconds}) {
+    if (value is num) {
+      final numeric = value.toDouble();
+      if (numeric <= 0) {
+        return null;
+      }
+      return isSeconds ? (numeric / 60).round() : numeric.round();
+    }
+
+    if (value is String) {
+      final numeric = double.tryParse(value.trim());
+      if (numeric == null || numeric <= 0) {
+        return null;
+      }
+      return isSeconds ? (numeric / 60).round() : numeric.round();
     }
 
     return null;
@@ -1727,36 +1778,81 @@ class TransitRouteService {
   }
 
   bool _looksLikeTrain(String modeText, Map<String, dynamic> leg) {
-    if (modeText.contains('train') ||
-        modeText.contains('rail') ||
-        modeText.contains('tube') ||
-        modeText.contains('tram') ||
-        modeText.contains('underground')) {
+    if (leg.containsKey('from_station_code') ||
+        leg.containsKey('to_station_code') ||
+        leg.containsKey('platform') ||
+        leg.containsKey('train_uid') ||
+        leg.containsKey('toc')) {
       return true;
     }
 
-    final route = _readFirstString(
-      leg,
-      const ['route_name', 'line_name', 'description', 'operator_name', 'line'],
-    ).toLowerCase();
+    final text = _legText(modeText, leg);
 
-    return route.contains('rail') ||
-        route.contains('train') ||
-        route.contains('tube') ||
-        route.contains('tram');
+    return text.contains('train') ||
+        text.contains('rail') ||
+        text.contains('national rail') ||
+        text.contains('underground') ||
+        text.contains('tube') ||
+        text.contains('tram') ||
+        text.contains('northern') ||
+        text.contains('lner') ||
+        text.contains('transpennine') ||
+        text.contains('crosscountry') ||
+        text.contains('merseyrail') ||
+        text.contains('southeastern') ||
+        text.contains('scotrail') ||
+        text.contains('elizabeth line') ||
+        text.contains('overground');
   }
 
   bool _looksLikeBus(String modeText, Map<String, dynamic> leg) {
-    if (modeText.contains('bus') || modeText.contains('coach')) {
+    if (leg.containsKey('from_atcocode') ||
+        leg.containsKey('to_atcocode') ||
+        leg.containsKey('from_naptan_code') ||
+        leg.containsKey('to_naptan_code')) {
       return true;
     }
 
-    final route = _readFirstString(
-      leg,
-      const ['route_name', 'line_name', 'description', 'operator_name', 'line'],
-    ).toLowerCase();
+    final text = _legText(modeText, leg);
 
-    return route.contains('bus') || route.contains('coach');
+    return text.contains('bus') || text.contains('coach');
+  }
+
+  String _legText(String modeText, Map<String, dynamic> leg) {
+    return [
+      modeText,
+      _readFirstString(
+        leg,
+        const [
+          'mode',
+          'type',
+          'travel_mode',
+          'transport_mode',
+          'mode_name',
+          'vehicle',
+          'vehicle_type',
+          'line',
+          'line_name',
+          'service',
+          'service_name',
+          'route',
+          'route_name',
+          'description',
+          'operator',
+          'operator_name',
+          'number',
+        ],
+      ),
+      _readFirstString(
+        leg,
+        const [
+          'from_station_code',
+          'to_station_code',
+          'from_atcocode',
+          'to_atcocode',
+        ],
+      ),
+    ].join(' ').toLowerCase();
   }
 
   String? _nullIfBlank(String? value) {
@@ -1775,5 +1871,91 @@ class TransitRouteService {
   String _buildBusTimetableUrl(String placeName) {
     final encoded = Uri.encodeComponent(placeName);
     return 'https://www.google.com/search?q=bus+timetable+$encoded';
+  }
+
+  void _debugDumpTransportApiRoutes(Map<String, dynamic> data) {
+    if (!_debugLoggingEnabled) {
+      return;
+    }
+
+    final rawRoutes = data['routes'] ?? data['journeys'];
+    if (rawRoutes is! List) {
+      print('Transit debug: no routes/journeys list');
+      return;
+    }
+
+    print('Transit debug: raw route count=${rawRoutes.length}');
+
+    for (var i = 0; i < rawRoutes.length && i < 5; i++) {
+      final route = _asMap(rawRoutes[i]);
+      if (route == null) {
+        continue;
+      }
+
+      print('Transit debug: route[$i]');
+      print('  departure=${route['departure_time'] ?? route['depart_at'] ?? route['departure']}');
+      print('  arrival=${route['arrival_time'] ?? route['arrive_at'] ?? route['arrival']}');
+      print('  duration=${route['duration'] ?? route['duration_minutes'] ?? route['total_duration']}');
+
+      final rawParts = route['route_parts'] ?? route['legs'];
+      if (rawParts is! List) {
+        continue;
+      }
+
+      for (var j = 0; j < rawParts.length; j++) {
+        final part = _asMap(rawParts[j]);
+        if (part == null) {
+          continue;
+        }
+
+        print(
+          '  leg[$j] '
+              'mode=${part['mode'] ?? part['type'] ?? part['travel_mode'] ?? part['transport_mode']} '
+              'line=${part['line'] ?? part['line_name'] ?? part['service'] ?? part['service_name'] ?? part['route']} '
+              'operator=${part['operator_name'] ?? part['operator']} '
+              'from=${part['from_point_name'] ?? part['from_name'] ?? part['from']} '
+              'to=${part['to_point_name'] ?? part['to_name'] ?? part['to']} '
+              'from_station=${part['from_station_code']} '
+              'to_station=${part['to_station_code']} '
+              'from_atco=${part['from_atcocode']} '
+              'to_atco=${part['to_atcocode']} '
+              'duration=${part['duration'] ?? part['duration_minutes'] ?? part['travel_time']}',
+        );
+      }
+    }
+  }
+
+  void _debugDumpParsedJourneyOptions(List<TransitJourneyOption> options) {
+    if (!_debugLoggingEnabled) {
+      return;
+    }
+
+    print('Transit debug: parsed journey option count=${options.length}');
+
+    for (var i = 0; i < options.length && i < 5; i++) {
+      final option = options[i];
+      final plan = option.plan;
+
+      print(
+        'Transit debug: option[$i] '
+            'mode=${option.modeLabel} '
+            'tag=${option.tag} '
+            'duration=${plan.effectiveDurationMinutes} '
+            'changes=${plan.interchangeCount} '
+            'headline=${plan.routeHeadline}',
+      );
+
+      for (var j = 0; j < plan.legs.length; j++) {
+        final leg = plan.legs[j];
+        print(
+          '  parsed leg[$j] '
+              'type=${leg.type.name} '
+              'code=${leg.routeCode} '
+              'from=${leg.fromStopName} '
+              'to=${leg.toStopName} '
+              'minutes=${leg.durationMinutes}',
+        );
+      }
+    }
   }
 }

@@ -1,3 +1,6 @@
+// lib/services/routeoptionsservice.dart
+// Replace only the transit duration/tag parts inside buildOptions.
+
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 
 import '../features/routes/route_option.dart';
@@ -48,6 +51,7 @@ class RouteOptionsService {
           'bus:${transport.bus != null}, '
           'train:${transport.train != null}, '
           'recommended:${transport.recommendedMode}, '
+          'journeyOptions:${transport.journeyOptions.length}, '
           'debug:${transport.debugReason}',
     );
 
@@ -56,7 +60,9 @@ class RouteOptionsService {
 
     if (recommended != null) {
       final fare = transport.recommendedFare;
-      final isTrain = recommended.mode == PublicTransportMode.train;
+      final plan = recommended.journeyPlan;
+      final isMixed = plan?.hasBus == true && plan?.hasTrain == true;
+      final isTrainOnly = recommended.mode == PublicTransportMode.train && !isMixed;
       final totalDistance =
           recommended.totalJourneyDistanceMeters ??
               (recommended.accessDistanceMeters ?? 0);
@@ -64,27 +70,37 @@ class RouteOptionsService {
       options.add(
         RouteOption(
           mode: 'Public Transport',
-          tag: isTrain ? 'Train recommended' : 'Bus recommended',
-          durationMinutes: 0,
+          tag: isMixed
+              ? 'Bus + train'
+              : isTrainOnly
+              ? 'Train recommended'
+              : 'Bus recommended',
+          durationMinutes: plan?.effectiveDurationMinutes ?? 0,
           distanceMeters: totalDistance,
           estimatedCost: null,
           costText: fare?.formatted,
           co2Kg: _co2Service.publicTransportKg(totalDistance),
           description: _buildTransitDescription(
             pair: recommended,
-            title: isTrain ? 'Recommended rail route' : 'Recommended bus route',
+            title: isMixed
+                ? 'Recommended mixed transit route'
+                : isTrainOnly
+                ? 'Recommended rail route'
+                : 'Recommended bus route',
           ),
           source: 'Atlas transport info',
           isFeatured: true,
           sortPriority: 0,
           primaryAction: RouteOptionAction(
-            label: isTrain ? 'Tickets' : 'Timetable',
+            label: isTrainOnly || isMixed ? 'Tickets' : 'Timetable',
             uri: Uri.parse(recommended.fromOrigin!.detailsUrl),
           ),
           secondaryAction: alternative != null
               ? RouteOptionAction(
-            label: alternative.mode == PublicTransportMode.train
-                ? 'See train alternative'
+            label: ((alternative.journeyPlan?.hasBus == true &&
+                alternative.journeyPlan?.hasTrain == true) ||
+                alternative.mode == PublicTransportMode.train)
+                ? 'See rail alternative'
                 : 'See bus alternative',
             uri: Uri.parse(alternative.fromOrigin!.detailsUrl),
           )
@@ -95,7 +111,9 @@ class RouteOptionsService {
 
     if (alternative != null) {
       final fare = transport.alternativeFare;
-      final isTrain = alternative.mode == PublicTransportMode.train;
+      final plan = alternative.journeyPlan;
+      final isMixed = plan?.hasBus == true && plan?.hasTrain == true;
+      final isTrainOnly = alternative.mode == PublicTransportMode.train && !isMixed;
       final totalDistance =
           alternative.totalJourneyDistanceMeters ??
               (alternative.accessDistanceMeters ?? 0);
@@ -103,21 +121,29 @@ class RouteOptionsService {
       options.add(
         RouteOption(
           mode: 'Public Transport',
-          tag: isTrain ? 'Train alternative' : 'Bus alternative',
-          durationMinutes: 0,
+          tag: isMixed
+              ? 'Bus + train alternative'
+              : isTrainOnly
+              ? 'Train alternative'
+              : 'Bus alternative',
+          durationMinutes: plan?.effectiveDurationMinutes ?? 0,
           distanceMeters: totalDistance,
           estimatedCost: null,
           costText: fare?.formatted,
           co2Kg: _co2Service.publicTransportKg(totalDistance),
           description: _buildTransitDescription(
             pair: alternative,
-            title: isTrain ? 'Alternative rail route' : 'Alternative bus route',
+            title: isMixed
+                ? 'Alternative mixed transit route'
+                : isTrainOnly
+                ? 'Alternative rail route'
+                : 'Alternative bus route',
           ),
           source: 'Atlas transport info',
           isFeatured: false,
           sortPriority: 1,
           primaryAction: RouteOptionAction(
-            label: isTrain ? 'Tickets' : 'Timetable',
+            label: isTrainOnly || isMixed ? 'Tickets' : 'Timetable',
             uri: Uri.parse(alternative.fromOrigin!.detailsUrl),
           ),
         ),

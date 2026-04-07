@@ -1,6 +1,6 @@
 // lib/features/transport/transport_api.dart
-import 'dart:convert';
 
+import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class TransportApi {
@@ -23,7 +23,7 @@ class TransportApi {
     required double toLon,
     DateTime? dateTime,
     String service = 'traveline',
-    bool groupByRoute = true,
+    bool groupByRoute = false,
     bool showCallingPoints = false,
   }) async {
     final when = (dateTime ?? DateTime.now()).toLocal();
