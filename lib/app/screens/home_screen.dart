@@ -1,5 +1,8 @@
+// lib/app/screens/home_screen.dart
+
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import 'package:atlas/app/screens/route_options_screen.dart';
@@ -101,8 +104,16 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   static const String _favoritesStorageKey = 'atlas_saved_favorites_v1';
+
+  static const Color _routeBlue = Color(0xFF2F80FF);
+  static const Color _routeBlueGlow = Color(0x552F80FF);
+
+  static const Duration _routeDrawDuration = Duration(milliseconds: 1500);
+  static const Duration _routeFrameInterval = Duration(milliseconds: 42);
+  static const double _routeMinPointDistanceMeters = 12;
 
   final Completer<AppleMapController> _mapControllerCompleter =
   Completer<AppleMapController>();
@@ -128,6 +139,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final Set<Annotation> _annotations = <Annotation>{};
   final Set<Polyline> _polylines = <Polyline>{};
+
+  Timer? _routeAnimationTimer;
+  int _routeAnimationToken = 0;
 
   static const CameraPosition _fallbackCamera = CameraPosition(
     target: LatLng(53.3811, -1.4701),
@@ -186,6 +200,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadSavedFavorites();
+  }
+
+  @override
+  void dispose() {
+    _routeAnimationTimer?.cancel();
+    super.dispose();
   }
 
   void _openAccountPage() {
@@ -567,6 +587,8 @@ class _HomeScreenState extends State<HomeScreen> {
     required String name,
     required LatLng latLng,
   }) async {
+    _cancelRouteAnimation();
+
     setState(() {
       _selectedPlaceName = name;
       _selectedPlaceLatLng = latLng;
@@ -581,11 +603,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
 
-      if (_originToUse != null) {
+      final origin = _originToUse;
+      if (origin != null) {
         _annotations.add(
           Annotation(
             annotationId: AnnotationId('origin'),
-            position: _originToUse!,
+            position: origin,
             infoWindow: const InfoWindow(title: 'Start'),
           ),
         );
@@ -594,15 +617,14 @@ class _HomeScreenState extends State<HomeScreen> {
       _polylines.clear();
     });
 
-    await _focusOnDestination(latLng);
-
     final origin = _originToUse;
     if (origin == null) {
+      await _focusOnDestination(latLng);
       return;
     }
 
     try {
-      final points = await MapKitDirections.route(
+      final rawPoints = await MapKitDirections.route(
         origin: origin,
         destination: latLng,
         transport: 'automobile',
@@ -612,25 +634,285 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      final routePoints = points.isNotEmpty ? points : <LatLng>[origin, latLng];
-
-      setState(() {
-        _polylines
-          ..clear()
-          ..add(
-            Polyline(
-              polylineId: PolylineId('route'),
-              points: routePoints,
-              width: 6,
-            ),
-          );
-      });
+      final routePoints = _prepareRoutePoints(
+        rawPoints: rawPoints,
+        origin: origin,
+        destination: latLng,
+      );
 
       await _zoomToPolyline(routePoints);
+      _animateRoutePolyline(routePoints);
     } catch (e) {
       debugPrint('Route generation failed: $e');
       await _focusOnDestination(latLng);
     }
+  }
+
+  void _cancelRouteAnimation() {
+    _routeAnimationToken++;
+    _routeAnimationTimer?.cancel();
+    _routeAnimationTimer = null;
+  }
+
+  List<LatLng> _prepareRoutePoints({
+    required List<LatLng> rawPoints,
+    required LatLng origin,
+    required LatLng destination,
+  }) {
+    final source = rawPoints.isNotEmpty ? rawPoints : <LatLng>[origin, destination];
+    final deduped = <LatLng>[];
+
+    for (final point in source) {
+      if (deduped.isEmpty || !_samePoint(deduped.last, point)) {
+        deduped.add(point);
+      }
+    }
+
+    if (deduped.isEmpty || !_samePoint(deduped.first, origin)) {
+      deduped.insert(0, origin);
+    }
+
+    if (!_samePoint(deduped.last, destination)) {
+      deduped.add(destination);
+    }
+
+    return _thinRoutePoints(
+      deduped,
+      minDistanceMeters: _routeMinPointDistanceMeters,
+    );
+  }
+
+  List<LatLng> _thinRoutePoints(
+      List<LatLng> points, {
+        required double minDistanceMeters,
+      }) {
+    if (points.length <= 2) {
+      return points;
+    }
+
+    final simplified = <LatLng>[points.first];
+    var lastKept = points.first;
+
+    for (var i = 1; i < points.length - 1; i++) {
+      final point = points[i];
+      if (_distanceMetersApprox(lastKept, point) >= minDistanceMeters) {
+        simplified.add(point);
+        lastKept = point;
+      }
+    }
+
+    if (!_samePoint(simplified.last, points.last)) {
+      simplified.add(points.last);
+    }
+
+    return simplified;
+  }
+
+  double _distanceMetersApprox(LatLng a, LatLng b) {
+    const metersPerDegreeLat = 111320.0;
+    final meanLatRad = ((a.latitude + b.latitude) / 2) * (math.pi / 180.0);
+    final metersPerDegreeLng = 111320.0 * math.cos(meanLatRad);
+
+    final dLat = (a.latitude - b.latitude).abs() * metersPerDegreeLat;
+    final dLng = (a.longitude - b.longitude).abs() * metersPerDegreeLng;
+
+    return math.sqrt((dLat * dLat) + (dLng * dLng));
+  }
+
+  bool _samePoint(LatLng a, LatLng b) {
+    return _distanceMetersApprox(a, b) < 1.0;
+  }
+
+  Set<Polyline> _buildRoutePolylines(
+      List<LatLng> points, {
+        required bool includeGlow,
+      }) {
+    if (points.length < 2) {
+      return <Polyline>{};
+    }
+
+    final polylines = <Polyline>{
+      Polyline(
+        polylineId:  PolylineId('route_main'),
+        points: points,
+        color: _routeBlue,
+        width: 6,
+        zIndex: includeGlow ? 2 : 1,
+      ),
+    };
+
+    if (includeGlow) {
+      polylines.add(
+        Polyline(
+          polylineId:  PolylineId('route_glow'),
+          points: points,
+          color: _routeBlueGlow,
+          width: 12,
+          zIndex: 1,
+        ),
+      );
+    }
+
+    return polylines;
+  }
+
+  void _setVisibleRoutePolyline(
+      List<LatLng> visiblePoints, {
+        required bool includeGlow,
+      }) {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _polylines
+        ..clear()
+        ..addAll(
+          _buildRoutePolylines(
+            visiblePoints,
+            includeGlow: includeGlow,
+          ),
+        );
+    });
+  }
+
+  void _animateRoutePolyline(List<LatLng> routePoints) {
+    _cancelRouteAnimation();
+
+    if (routePoints.length < 2) {
+      _setVisibleRoutePolyline(routePoints, includeGlow: true);
+      return;
+    }
+
+    final cumulativeDistances = _buildCumulativeDistances(routePoints);
+    final totalDistance = cumulativeDistances.last;
+
+    if (totalDistance <= 0) {
+      _setVisibleRoutePolyline(routePoints, includeGlow: true);
+      return;
+    }
+
+    final token = _routeAnimationToken;
+    final totalFrames = math.max(
+      2,
+      (_routeDrawDuration.inMilliseconds / _routeFrameInterval.inMilliseconds)
+          .round(),
+    );
+
+    var frame = 0;
+
+    void paintFrame() {
+      if (!mounted || token != _routeAnimationToken) {
+        return;
+      }
+
+      final t = frame / totalFrames;
+      final eased = Curves.easeOutCubic.transform(t.clamp(0.0, 1.0));
+      final visibleDistance = totalDistance * eased;
+      final visiblePoints = _sliceRouteByDistance(
+        routePoints: routePoints,
+        cumulativeDistances: cumulativeDistances,
+        visibleDistance: visibleDistance,
+      );
+
+      final isDone = frame >= totalFrames;
+      _setVisibleRoutePolyline(
+        visiblePoints,
+        includeGlow: isDone,
+      );
+    }
+
+    paintFrame();
+
+    _routeAnimationTimer = Timer.periodic(_routeFrameInterval, (timer) {
+      if (!mounted || token != _routeAnimationToken) {
+        timer.cancel();
+        return;
+      }
+
+      frame++;
+
+      if (frame >= totalFrames) {
+        _setVisibleRoutePolyline(routePoints, includeGlow: true);
+        timer.cancel();
+        return;
+      }
+
+      paintFrame();
+    });
+  }
+
+  List<double> _buildCumulativeDistances(List<LatLng> points) {
+    final distances = <double>[0];
+
+    for (var i = 1; i < points.length; i++) {
+      distances.add(
+        distances.last + _distanceMetersApprox(points[i - 1], points[i]),
+      );
+    }
+
+    return distances;
+  }
+
+  List<LatLng> _sliceRouteByDistance({
+    required List<LatLng> routePoints,
+    required List<double> cumulativeDistances,
+    required double visibleDistance,
+  }) {
+    if (routePoints.length < 2) {
+      return List<LatLng>.from(routePoints);
+    }
+
+    if (visibleDistance <= 0) {
+      return <LatLng>[routePoints.first, routePoints.first];
+    }
+
+    final totalDistance = cumulativeDistances.last;
+    if (visibleDistance >= totalDistance) {
+      return List<LatLng>.from(routePoints);
+    }
+
+    var segmentIndex = 0;
+    while (segmentIndex < cumulativeDistances.length - 1 &&
+        cumulativeDistances[segmentIndex + 1] < visibleDistance) {
+      segmentIndex++;
+    }
+
+    final visible = <LatLng>[];
+    for (var i = 0; i <= segmentIndex; i++) {
+      visible.add(routePoints[i]);
+    }
+
+    final segmentStart = routePoints[segmentIndex];
+    final segmentEnd = routePoints[segmentIndex + 1];
+    final segmentStartDistance = cumulativeDistances[segmentIndex];
+    final segmentEndDistance = cumulativeDistances[segmentIndex + 1];
+    final segmentLength = segmentEndDistance - segmentStartDistance;
+
+    if (segmentLength <= 0) {
+      visible.add(segmentEnd);
+      return visible;
+    }
+
+    final localT =
+    ((visibleDistance - segmentStartDistance) / segmentLength).clamp(0.0, 1.0);
+
+    final interpolated = LatLng(
+      segmentStart.latitude +
+          ((segmentEnd.latitude - segmentStart.latitude) * localT),
+      segmentStart.longitude +
+          ((segmentEnd.longitude - segmentStart.longitude) * localT),
+    );
+
+    if (visible.isEmpty || !_samePoint(visible.last, interpolated)) {
+      visible.add(interpolated);
+    }
+
+    if (visible.length == 1) {
+      visible.add(interpolated);
+    }
+
+    return visible;
   }
 
   Future<void> _focusOnDestination(LatLng latLng) async {
@@ -638,8 +920,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (controller == null) {
       return;
     }
-
-    await Future<void>.delayed(const Duration(milliseconds: 120));
 
     await controller.animateCamera(
       CameraUpdate.newCameraPosition(
@@ -683,8 +963,6 @@ class _HomeScreenState extends State<HomeScreen> {
       southwest: LatLng(minLat, minLng),
       northeast: LatLng(maxLat, maxLng),
     );
-
-    await Future<void>.delayed(const Duration(milliseconds: 120));
 
     await controller.animateCamera(
       CameraUpdate.newLatLngBounds(bounds, 110),
@@ -1345,9 +1623,7 @@ class _FavouriteRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final atlas = context.atlas;
-    final tt = Theme
-        .of(context)
-        .textTheme;
+    final tt = Theme.of(context).textTheme;
 
     return Material(
       color: atlas.surface.withOpacity(0.45),

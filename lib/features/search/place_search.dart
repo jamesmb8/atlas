@@ -1,15 +1,9 @@
 import 'dart:async';
+
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
+import 'package:atlas/features/themes/atlas_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-
-class AtlasPalette {
-  static const background = Color(0xFFF7F6F2);
-  static const primaryText = Color(0xFF1F1F1F);
-  static const secondaryText = Color(0xFF6B6E6A);
-  static const accent = Color(0xFF9FC8B2);
-  static const divider = Color(0xFFE3E4DE);
-}
 
 class PlaceSearchScreen extends StatefulWidget {
   const PlaceSearchScreen({super.key});
@@ -31,8 +25,9 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
   void initState() {
     super.initState();
     _controller.addListener(_onQueryChanged);
-    // Autofocus
-    WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNode.requestFocus();
+    });
   }
 
   @override
@@ -46,8 +41,11 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
   void _onQueryChanged() {
     final q = _controller.text.trim();
     _debounce?.cancel();
+
     _debounce = Timer(const Duration(milliseconds: 250), () async {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       if (q.isEmpty) {
         setState(() => _suggestions = []);
@@ -55,107 +53,134 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
       }
 
       setState(() => _loading = true);
+
       try {
         final results = await MapKitSearch.autocomplete(q);
-        if (!mounted) return;
+        if (!mounted) {
+          return;
+        }
         setState(() => _suggestions = results);
       } catch (_) {
-        if (!mounted) return;
+        if (!mounted) {
+          return;
+        }
         setState(() => _suggestions = []);
       } finally {
-        if (mounted) setState(() => _loading = false);
+        if (mounted) {
+          setState(() => _loading = false);
+        }
       }
     });
   }
 
   Future<void> _selectSuggestion(_PlaceSuggestion s) async {
     setState(() => _loading = true);
+
     try {
       final resolved = await MapKitSearch.resolve(s.title, s.subtitle);
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       Navigator.pop(context, resolved);
-    } catch (e) {
-      if (!mounted) return;
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Couldn't find that place. Try another.")),
+        const SnackBar(
+          content: Text("Couldn't find that place. Try another."),
+        ),
       );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
     return Scaffold(
-      backgroundColor: AtlasPalette.background,
+      backgroundColor: atlas.background,
       appBar: AppBar(
-        backgroundColor: AtlasPalette.background,
-        surfaceTintColor: AtlasPalette.background,
+        backgroundColor: atlas.background,
+        surfaceTintColor: atlas.background,
         elevation: 0,
-        iconTheme: const IconThemeData(color: AtlasPalette.primaryText),
-        title: const Text(
-          "Search",
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w400,
-            color: AtlasPalette.primaryText,
+        iconTheme: IconThemeData(color: atlas.textPrimary),
+        title: Text(
+          'Search',
+          style: tt.titleLarge?.copyWith(
+            color: atlas.textPrimary,
+            fontWeight: FontWeight.w700,
           ),
         ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: AtlasPalette.divider),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: atlas.border),
         ),
       ),
       body: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
         child: Column(
           children: [
-            // Search field (same vibe as your _AtlasTextField)
             TextField(
               controller: _controller,
               focusNode: _focusNode,
               textInputAction: TextInputAction.search,
-              style: const TextStyle(
-                color: AtlasPalette.primaryText,
+              style: tt.bodyLarge?.copyWith(
+                color: atlas.textPrimary,
                 fontSize: 16,
-                fontWeight: FontWeight.w400,
               ),
               decoration: InputDecoration(
-                hintText: "Where to?",
-                hintStyle: TextStyle(
-                  color: AtlasPalette.secondaryText.withOpacity(0.7),
+                hintText: 'Where to?',
+                hintStyle: tt.bodyMedium?.copyWith(
+                  color: atlas.textSecondary.withOpacity(0.7),
                 ),
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.45),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                fillColor: atlas.surface.withOpacity(0.55),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
+                ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: AtlasPalette.divider),
+                  borderSide: BorderSide(color: atlas.border),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: AtlasPalette.accent, width: 1.4),
+                  borderSide: BorderSide(
+                    color: atlas.brandPrimary,
+                    width: 1.4,
+                  ),
                 ),
-                prefixIcon: const Icon(Icons.search, color: AtlasPalette.secondaryText),
+                prefixIcon: Icon(Icons.search, color: atlas.textSecondary),
                 suffixIcon: _loading
-                    ? const Padding(
-                  padding: EdgeInsets.all(14),
+                    ? Padding(
+                  padding: const EdgeInsets.all(14),
                   child: SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: atlas.brandPrimary,
+                    ),
                   ),
                 )
                     : (_controller.text.isEmpty
                     ? null
                     : IconButton(
                   onPressed: () => _controller.clear(),
-                  icon: const Icon(Icons.close, color: AtlasPalette.secondaryText),
+                  icon: Icon(
+                    Icons.close,
+                    color: atlas.textSecondary,
+                  ),
                 )),
               ),
             ),
             const SizedBox(height: 12),
-
             Expanded(
               child: _suggestions.isEmpty
                   ? const _EmptyState()
@@ -184,13 +209,15 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
     return Center(
       child: Text(
-        "Start typing to search nearby places.",
-        style: TextStyle(
+        'Start typing to search nearby places.',
+        style: tt.bodySmall?.copyWith(
           fontSize: 14,
-          fontWeight: FontWeight.w400,
-          color: AtlasPalette.secondaryText,
+          color: atlas.textSecondary,
         ),
       ),
     );
@@ -210,61 +237,68 @@ class _SuggestionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    return Material(
+      color: atlas.surface.withOpacity(0.5),
       borderRadius: BorderRadius.circular(16),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.45),
-          border: Border.all(color: AtlasPalette.divider),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.place_outlined, color: AtlasPalette.secondaryText),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w400,
-                      color: AtlasPalette.primaryText,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            border: Border.all(color: atlas.border),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.place_outlined, color: atlas.textSecondary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tt.titleMedium?.copyWith(
+                        fontSize: 15,
+                        color: atlas.textPrimary,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w400,
-                      color: AtlasPalette.secondaryText,
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tt.bodySmall?.copyWith(
+                        fontSize: 13,
+                        color: atlas.textSecondary,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const Icon(Icons.chevron_right, color: AtlasPalette.secondaryText),
-          ],
+              Icon(Icons.chevron_right, color: atlas.textSecondary),
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// What Flutter receives from autocomplete()
 class _PlaceSuggestion {
   final String title;
   final String subtitle;
-  const _PlaceSuggestion({required this.title, required this.subtitle});
+
+  const _PlaceSuggestion({
+    required this.title,
+    required this.subtitle,
+  });
 
   factory _PlaceSuggestion.fromMap(Map<dynamic, dynamic> m) {
     return _PlaceSuggestion(
@@ -274,11 +308,11 @@ class _PlaceSuggestion {
   }
 }
 
-/// What Flutter returns to Home after resolve()
 class ResolvedPlace {
   final String title;
   final String subtitle;
   final LatLng latLng;
+
   const ResolvedPlace({
     required this.title,
     required this.subtitle,
@@ -295,13 +329,11 @@ class MapKitSearch {
       {'query': query},
     );
 
-    final list = (res ?? const [])
+    return (res ?? const [])
         .cast<Map<dynamic, dynamic>>()
         .map(_PlaceSuggestion.fromMap)
         .where((s) => s.title.isNotEmpty)
         .toList();
-
-    return list;
   }
 
   static Future<ResolvedPlace> resolve(String title, String subtitle) async {
@@ -310,7 +342,9 @@ class MapKitSearch {
       {'title': title, 'subtitle': subtitle},
     );
 
-    if (res == null) throw Exception('resolve returned null');
+    if (res == null) {
+      throw Exception('resolve returned null');
+    }
 
     final lat = (res['lat'] as num).toDouble();
     final lng = (res['lng'] as num).toDouble();
