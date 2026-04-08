@@ -1445,8 +1445,8 @@ class TransitRouteService {
   }
 
   String? _extractApiReason(Map<String, dynamic> data) {
-    final routes = data['routes'];
-    if (routes is List && routes.isNotEmpty) {
+    final rawRoutes = data['routes'] ?? data['journeys'];
+    if (rawRoutes is List && rawRoutes.isNotEmpty) {
       return null;
     }
 
@@ -1474,7 +1474,7 @@ class TransitRouteService {
           'from=${fromError ?? 'ok'}, to=${toError ?? 'ok'}';
     }
 
-    return null;
+    return 'public_journey returned no usable routes';
   }
 
   double? _readDistanceMeters(Map<String, dynamic> item) {

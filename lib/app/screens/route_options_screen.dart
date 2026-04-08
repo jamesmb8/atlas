@@ -1,11 +1,10 @@
-
-
 // lib/screens/routes/route_options_screen.dart
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../features/routes/route_option.dart';
+import '../../features/themes/atlas_theme.dart';
 import '../../services/routeservice.dart';
 import '../../services/transitrouteservice.dart';
 
@@ -29,7 +28,6 @@ class RouteOptionsScreen extends StatefulWidget {
 
 class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
   final RouteOptionsService _routeOptionsService = RouteOptionsService();
-  final TransitRouteService _transitRouteService = TransitRouteService();
 
   bool _loading = true;
   List<RouteOption> _options = [];
@@ -45,6 +43,15 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
     return null;
   }
 
+  bool _isPublicTransportMode(String mode) {
+    final normalized = mode.trim().toLowerCase();
+    return normalized == 'public transport' || normalized == 'transit';
+  }
+
+  bool _containsPublicTransportOption(List<RouteOption> options) {
+    return options.any((option) => _isPublicTransportMode(option.mode));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -58,39 +65,20 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
     });
 
     try {
-      final optionsFuture = _routeOptionsService.buildOptions(
+      final result = await _routeOptionsService.buildOptions(
         origin: widget.origin,
         destination: widget.destination,
         destinationName: widget.destinationName,
+        departureTime: widget.departureTime,
       );
-
-      Future<PublicTransportResult?> transportFuture() async {
-        if (widget.origin == null) {
-          return null;
-        }
-
-        try {
-          return await _transitRouteService.getPublicTransportSummary(
-            destinationName: widget.destinationName,
-            origin: widget.origin!,
-            destination: widget.destination,
-            departureTime: widget.departureTime,
-          );
-        } catch (_) {
-          return null;
-        }
-      }
-
-      final options = await optionsFuture;
-      final publicTransportResult = await transportFuture();
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _options = options;
-        _publicTransportResult = publicTransportResult;
+        _options = result.options;
+        _publicTransportResult = result.publicTransportResult;
         _loading = false;
       });
     } catch (e) {
@@ -118,88 +106,115 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const bg = Color(0xFFF7F6F2);
-    const primaryText = Color(0xFF1F1F1F);
-    const secondaryText = Color(0xFF6B6E6A);
-    const border = Color(0xFFE3E4DE);
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    final hasEmbeddedTransitOption = _containsPublicTransportOption(_options);
+    final showStandaloneTransitCard =
+        !hasEmbeddedTransitOption &&
+            widget.origin != null &&
+            _publicTransportResult != null;
 
     return Scaffold(
-      backgroundColor: bg,
+      backgroundColor: atlas.background,
       appBar: AppBar(
-        backgroundColor: bg,
+        backgroundColor: atlas.background,
+        foregroundColor: atlas.textPrimary,
         elevation: 0,
-        surfaceTintColor: bg,
-        iconTheme: const IconThemeData(color: primaryText),
+        surfaceTintColor: atlas.background,
         title: Text(
           widget.destinationName,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w400,
-            color: primaryText,
+          style: tt.titleLarge?.copyWith(
+            color: atlas.textPrimary,
+            fontWeight: FontWeight.w700,
           ),
         ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: border),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: atlas.border),
         ),
       ),
       body: SafeArea(
         child: _loading
-            ? const Center(child: CircularProgressIndicator())
+            ? Center(
+          child: CircularProgressIndicator(color: atlas.brandPrimary),
+        )
             : _error != null
             ? Center(
           child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              _error!,
-              style: const TextStyle(color: Colors.red),
+            padding: const EdgeInsets.all(20),
+            child: Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: atlas.surface,
+                border: Border.all(color: atlas.border),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Text(
+                _error!,
+                style: tt.bodyMedium?.copyWith(
+                  color: atlas.danger,
+                  height: 1.4,
+                ),
+              ),
             ),
           ),
         )
             : ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
           children: [
-            const Text(
-              'Journey options',
-              style: TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w400,
-                color: primaryText,
-              ),
+            _ResultsHeaderCard(
+              title: 'Journey options',
+              subtitle: 'Compare time, cost and CO₂ before you go.',
+              departureLabel: _formatDepartureContext(),
+              countLabel: _options.isEmpty && !showStandaloneTransitCard
+                  ? 'No options yet'
+                  : '${_options.length + (showStandaloneTransitCard ? 1 : 0)} options',
             ),
-            const SizedBox(height: 8),
-            Text(
-              _formatDepartureContext(),
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w400,
-                color: secondaryText,
-              ),
-            ),
-            const SizedBox(height: 20),
-            if (_options.isEmpty)
-              const Text(
-                'No route options available yet.',
-                style: TextStyle(
-                  fontSize: 15,
-                  color: secondaryText,
+            const SizedBox(height: 18),
+            if (_options.isEmpty && !showStandaloneTransitCard)
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: atlas.surface,
+                  border: Border.all(color: atlas.border),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Text(
+                  'No route options available yet.',
+                  style: tt.bodyMedium?.copyWith(
+                    color: atlas.textSecondary,
+                    height: 1.4,
+                  ),
                 ),
               )
-            else
+            else ...[
               ..._options.map(
                     (option) => Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: _RouteOptionCard(
                     destinationName: widget.destinationName,
+                    destination: widget.destination,
+                    origin: widget.origin,
                     option: option,
                     publicTransportResult:
-                    option.mode.toLowerCase() == 'public transport'
+                    _isPublicTransportMode(option.mode)
                         ? _publicTransportResult
                         : null,
                     drivingCo2Kg: _drivingCo2Kg,
                   ),
                 ),
               ),
+              if (showStandaloneTransitCard)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _StandalonePublicTransportCard(
+                    destinationName: widget.destinationName,
+                    result: _publicTransportResult!,
+                    drivingCo2Kg: _drivingCo2Kg,
+                  ),
+                ),
+            ],
           ],
         ),
       ),
@@ -207,26 +222,156 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
   }
 }
 
+class _ResultsHeaderCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String departureLabel;
+  final String countLabel;
+
+  const _ResultsHeaderCard({
+    required this.title,
+    required this.subtitle,
+    required this.departureLabel,
+    required this.countLabel,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: atlas.surfaceFeatured,
+        border: Border.all(color: atlas.border),
+        borderRadius: BorderRadius.circular(26),
+        boxShadow: const [
+          BoxShadow(
+            blurRadius: 18,
+            offset: Offset(0, 8),
+            color: Color(0x10000000),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: tt.headlineSmall?.copyWith(
+              color: atlas.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: tt.bodyMedium?.copyWith(
+              color: atlas.textSecondary,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _InfoPill(
+                icon: Icons.schedule_rounded,
+                label: departureLabel,
+              ),
+              _InfoPill(
+                icon: Icons.route_rounded,
+                label: countLabel,
+                filled: true,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool filled;
+
+  const _InfoPill({
+    required this.icon,
+    required this.label,
+    this.filled = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: filled
+            ? atlas.brandHighlight.withOpacity(0.95)
+            : atlas.surface.withOpacity(0.78),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: atlas.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: atlas.textPrimary),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: tt.labelMedium?.copyWith(
+              color: atlas.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _RouteOptionCard extends StatelessWidget {
   final String destinationName;
+  final LatLng destination;
+  final LatLng? origin;
   final RouteOption option;
   final PublicTransportResult? publicTransportResult;
   final double? drivingCo2Kg;
 
   const _RouteOptionCard({
     required this.destinationName,
+    required this.destination,
+    required this.origin,
     required this.option,
     this.publicTransportResult,
     this.drivingCo2Kg,
   });
 
+  bool _isPublicTransportMode(String mode) {
+    final normalized = mode.trim().toLowerCase();
+    return normalized == 'public transport' || normalized == 'transit';
+  }
+
+  bool _supportsAppleMaps(String mode) {
+    final normalized = mode.trim().toLowerCase();
+    return normalized == 'walk' || normalized == 'drive';
+  }
+
   IconData _iconForMode(String mode) {
-    switch (mode.toLowerCase()) {
+    switch (mode.trim().toLowerCase()) {
       case 'walk':
         return Icons.directions_walk_rounded;
       case 'drive':
         return Icons.directions_car_filled_rounded;
       case 'public transport':
+      case 'transit':
         return Icons.directions_transit_rounded;
       default:
         return Icons.route_rounded;
@@ -245,7 +390,7 @@ class _RouteOptionCard extends StatelessWidget {
     final remainder = minutes % 60;
 
     if (hours <= 0) {
-      return '${minutes} min';
+      return '$minutes min';
     }
     if (remainder == 0) {
       return '${hours}h';
@@ -258,7 +403,7 @@ class _RouteOptionCard extends StatelessWidget {
   }
 
   bool _shouldShowTime(RouteOption option) {
-    if (option.mode.toLowerCase() == 'public transport') {
+    if (_isPublicTransportMode(option.mode)) {
       return false;
     }
     return option.durationMinutes > 0;
@@ -296,7 +441,7 @@ class _RouteOptionCard extends StatelessWidget {
       return '£${option.estimatedCost!.toStringAsFixed(2)}';
     }
 
-    if (option.mode.toLowerCase() == 'public transport') {
+    if (_isPublicTransportMode(option.mode)) {
       return _formatPublicTransportFareRange(option.distanceMeters);
     }
 
@@ -346,47 +491,62 @@ class _RouteOptionCard extends StatelessWidget {
     return best;
   }
 
+  Uri _appleMapsUri() {
+    final normalized = option.mode.trim().toLowerCase();
+    final dirflg = normalized == 'walk' ? 'w' : 'd';
+
+    return Uri.https(
+      'maps.apple.com',
+      '/',
+      <String, String>{
+        'daddr': '${destination.latitude},${destination.longitude}',
+        'dirflg': dirflg,
+        'q': destinationName,
+        if (origin != null) 'saddr': '${origin!.latitude},${origin!.longitude}',
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    const primaryText = Color(0xFF1F1F1F);
-    const secondaryText = Color(0xFF6B6E6A);
-    const accent = Color(0xFF9FC8B2);
-    const featuredAccent = Color(0xFFE8F3EC);
-    const border = Color(0xFFE3E4DE);
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
 
     final showJourneyList =
-        publicTransportResult?.journeyOptions.isNotEmpty == true;
+        option.isFeatured && publicTransportResult?.journeyOptions.isNotEmpty == true;
 
-    final transitOptions =
-    showJourneyList ? publicTransportResult!.journeyOptions.take(3).toList() : const <TransitJourneyOption>[];
+    final transitOptions = showJourneyList
+        ? publicTransportResult!.journeyOptions.take(3).toList()
+        : const <TransitJourneyOption>[];
 
     final quickestTransitOption = _quickestOption(transitOptions);
     final greenestTransitOption = _greenestOption(transitOptions);
-    final firstTransitOption = transitOptions.isEmpty ? null : transitOptions.first;
+    final firstTransitOption =
+    transitOptions.isEmpty ? null : transitOptions.first;
 
     final showTime = _shouldShowTime(option);
 
     final metrics = <Widget>[
       if (showJourneyList && firstTransitOption != null)
-        Metric(
+        _MetricTile(
           label: 'Next',
           value: _formatClock(firstTransitOption.plan.departureTime) ?? 'Live',
         )
       else if (showTime)
-        Metric(label: 'Time', value: '${option.durationMinutes} min'),
-      Metric(
+        _MetricTile(label: 'Time', value: '${option.durationMinutes} min'),
+      _MetricTile(
         label: showJourneyList ? 'Fastest' : 'Cost',
         value: showJourneyList && quickestTransitOption != null
             ? _formatMinutes(quickestTransitOption.plan.effectiveDurationMinutes)
             : _formatCost(option),
       ),
-      Metric(
+      _MetricTile(
         label: showJourneyList ? 'Lowest CO₂' : 'CO₂',
         value: showJourneyList && greenestTransitOption != null
             ? _formatCo2(greenestTransitOption.plan.estimatedCo2Kg)
-            : '${option.co2Kg.toStringAsFixed(2)} kg',
+            : _formatCo2(option.co2Kg),
       ),
-      Metric(
+      _MetricTile(
         label: 'Distance',
         value: _formatDistance(
           quickestTransitOption?.plan.totalDistanceMeters ?? option.distanceMeters,
@@ -399,12 +559,19 @@ class _RouteOptionCard extends StatelessWidget {
       if (option.secondaryAction != null) option.secondaryAction!,
     ];
 
+    final hasAppleMapsAction = _supportsAppleMaps(option.mode);
+
     return Container(
       padding: EdgeInsets.all(option.isFeatured ? 20 : 16),
       decoration: BoxDecoration(
-        color: option.isFeatured ? featuredAccent : Colors.white.withOpacity(0.55),
-        border: Border.all(color: border, width: option.isFeatured ? 1.4 : 1),
-        borderRadius: BorderRadius.circular(option.isFeatured ? 24 : 20),
+        color: option.isFeatured
+            ? atlas.surfaceFeatured
+            : atlas.surface.withOpacity(0.88),
+        border: Border.all(
+          color: atlas.border,
+          width: option.isFeatured ? 1.4 : 1,
+        ),
+        borderRadius: BorderRadius.circular(option.isFeatured ? 26 : 22),
         boxShadow: option.isFeatured
             ? const [
           BoxShadow(
@@ -420,53 +587,51 @@ class _RouteOptionCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(
-                _iconForMode(option.mode),
-                color: primaryText,
-                size: option.isFeatured ? 26 : 24,
+              Container(
+                width: option.isFeatured ? 44 : 40,
+                height: option.isFeatured ? 44 : 40,
+                decoration: BoxDecoration(
+                  color: atlas.brandTertiary.withOpacity(0.22),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  _iconForMode(option.mode),
+                  color: atlas.textPrimary,
+                  size: option.isFeatured ? 24 : 22,
+                ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   option.mode,
-                  style: TextStyle(
+                  style: tt.titleLarge?.copyWith(
+                    color: atlas.textPrimary,
+                    fontWeight: FontWeight.w700,
                     fontSize: option.isFeatured ? 20 : 18,
-                    fontWeight: FontWeight.w500,
-                    color: primaryText,
                   ),
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: accent.withOpacity(option.isFeatured ? 0.32 : 0.22),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  showJourneyList ? 'Next 3 journeys' : option.tag,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: primaryText,
-                  ),
-                ),
+              _TagChip(
+                label: showJourneyList ? 'Next 3 journeys' : option.tag,
+                filled: option.isFeatured,
               ),
             ],
           ),
           SizedBox(height: option.isFeatured ? 18 : 14),
           Wrap(
-            spacing: 12,
-            runSpacing: 12,
+            spacing: 10,
+            runSpacing: 10,
             children: metrics
                 .map(
-                  (m) => SizedBox(
-                width: option.isFeatured ? 140 : 120,
-                child: m,
+                  (metric) => SizedBox(
+                width: option.isFeatured ? 148 : 132,
+                child: metric,
               ),
             )
                 .toList(growable: false),
           ),
-          SizedBox(height: option.isFeatured ? 16 : 12),
+          SizedBox(height: option.isFeatured ? 16 : 14),
           if (showJourneyList)
             _PublicTransportJourneyList(
               destinationName: destinationName,
@@ -479,53 +644,282 @@ class _RouteOptionCard extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
                   line,
-                  style: TextStyle(
-                    fontSize: option.isFeatured ? 15 : 14,
-                    fontWeight: FontWeight.w400,
-                    color: secondaryText,
+                  style: tt.bodyMedium?.copyWith(
+                    color: atlas.textSecondary,
                     height: 1.45,
                   ),
                 ),
               ),
             ),
-          const SizedBox(height: 8),
-          Text(
-            option.source,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w400,
-              color: secondaryText,
-            ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(
+                Icons.verified_outlined,
+                size: 14,
+                color: atlas.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  option.source,
+                  style: tt.bodySmall?.copyWith(
+                    color: atlas.textSecondary,
+                  ),
+                ),
+              ),
+            ],
           ),
-          if (actions.isNotEmpty && !showJourneyList) ...[
+          if (showJourneyList) ...[
+            const SizedBox(height: 14),
+            _ActionButton(
+              label: 'Buy tickets',
+              icon: Icons.confirmation_num_outlined,
+              filled: true,
+              onPressed: () => _launchExternal(
+                _ticketWebsiteUriForResult(publicTransportResult!),
+              ),
+            ),
+          ] else if (actions.isNotEmpty || hasAppleMapsAction) ...[
             const SizedBox(height: 14),
             Wrap(
               spacing: 10,
               runSpacing: 10,
-              children: actions
-                  .map(
-                    (a) => SizedBox(
-                  height: 38,
-                  child: OutlinedButton(
-                    onPressed: () => _launchExternal(a.uri),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: primaryText,
-                      side: const BorderSide(color: border),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                    child: Text(
-                      a.label,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
+              children: [
+                if (hasAppleMapsAction)
+                  _ActionButton(
+                    label: 'Open in Apple Maps',
+                    icon: Icons.map_outlined,
+                    filled: true,
+                    onPressed: () => _launchExternal(_appleMapsUri()),
+                  ),
+                ...actions.map(
+                      (action) => _ActionButton(
+                    label: action.label,
+                    icon: Icons.open_in_new_rounded,
+                    onPressed: () => _launchExternal(action.uri),
                   ),
                 ),
-              )
-                  .toList(growable: false),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _StandalonePublicTransportCard extends StatelessWidget {
+  final String destinationName;
+  final PublicTransportResult result;
+  final double? drivingCo2Kg;
+
+  const _StandalonePublicTransportCard({
+    required this.destinationName,
+    required this.result,
+    required this.drivingCo2Kg,
+  });
+
+  TransitJourneyOption? _quickestOption(List<TransitJourneyOption> options) {
+    if (options.isEmpty) {
+      return null;
+    }
+
+    var best = options.first;
+    for (final option in options.skip(1)) {
+      if (option.plan.effectiveDurationMinutes <
+          best.plan.effectiveDurationMinutes) {
+        best = option;
+      }
+    }
+    return best;
+  }
+
+  TransitJourneyOption? _greenestOption(List<TransitJourneyOption> options) {
+    if (options.isEmpty) {
+      return null;
+    }
+
+    var best = options.first;
+    for (final option in options.skip(1)) {
+      if (option.plan.estimatedCo2Kg < best.plan.estimatedCo2Kg) {
+        best = option;
+      }
+    }
+    return best;
+  }
+
+  String _formatMinutes(int minutes) {
+    final hours = minutes ~/ 60;
+    final remainder = minutes % 60;
+
+    if (hours <= 0) {
+      return '$minutes min';
+    }
+    if (remainder == 0) {
+      return '${hours}h';
+    }
+    return '${hours}h ${remainder}m';
+  }
+
+  String _formatCo2(double value) {
+    return '${value.toStringAsFixed(2)} kg';
+  }
+
+  String _formatDistance(double meters) {
+    if (meters >= 1000) {
+      return '${(meters / 1000).toStringAsFixed(1)} km';
+    }
+    return '${meters.toStringAsFixed(0)} m';
+  }
+
+  String _message() {
+    final reason = result.debugReason?.trim();
+    if (reason != null && reason.isNotEmpty) {
+      return 'No public transport journey was returned.\n$reason';
+    }
+    return 'No public transport journey was returned for this trip.';
+  }
+
+  Future<void> _launchExternal(Uri uri) async {
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    final transitOptions = result.journeyOptions.take(3).toList(growable: false);
+    final hasJourneys = transitOptions.isNotEmpty;
+    final firstTransitOption = hasJourneys ? transitOptions.first : null;
+    final quickestTransitOption = _quickestOption(transitOptions);
+    final greenestTransitOption = _greenestOption(transitOptions);
+
+    final metrics = <Widget>[
+      if (hasJourneys && firstTransitOption != null)
+        _MetricTile(
+          label: 'Next',
+          value: _formatClock(firstTransitOption.plan.departureTime) ?? 'Live',
+        )
+      else
+        const _MetricTile(label: 'Status', value: 'Unavailable'),
+      _MetricTile(
+        label: hasJourneys ? 'Fastest' : 'Cost',
+        value: hasJourneys && quickestTransitOption != null
+            ? _formatMinutes(quickestTransitOption.plan.effectiveDurationMinutes)
+            : '—',
+      ),
+      _MetricTile(
+        label: hasJourneys ? 'Lowest CO₂' : 'CO₂',
+        value: hasJourneys && greenestTransitOption != null
+            ? _formatCo2(greenestTransitOption.plan.estimatedCo2Kg)
+            : '—',
+      ),
+      _MetricTile(
+        label: 'Distance',
+        value: hasJourneys && quickestTransitOption != null
+            ? _formatDistance(quickestTransitOption.plan.totalDistanceMeters)
+            : '—',
+      ),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: atlas.surface.withOpacity(0.88),
+        border: Border.all(color: atlas.border),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: atlas.brandTertiary.withOpacity(0.22),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                alignment: Alignment.center,
+                child: Icon(
+                  Icons.directions_transit_rounded,
+                  color: atlas.textPrimary,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Public transport',
+                  style: tt.titleLarge?.copyWith(
+                    color: atlas.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                  ),
+                ),
+              ),
+              _TagChip(
+                label: hasJourneys ? 'Next 3 journeys' : 'Unavailable',
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: metrics
+                .map(
+                  (metric) => SizedBox(
+                width: 132,
+                child: metric,
+              ),
+            )
+                .toList(growable: false),
+          ),
+          const SizedBox(height: 14),
+          if (hasJourneys)
+            _PublicTransportJourneyList(
+              destinationName: destinationName,
+              result: result,
+              drivingCo2Kg: drivingCo2Kg,
+            )
+          else
+            Text(
+              _message(),
+              style: tt.bodyMedium?.copyWith(
+                color: atlas.textSecondary,
+                height: 1.4,
+              ),
+            ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Icon(
+                Icons.verified_outlined,
+                size: 14,
+                color: atlas.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'TransportAPI',
+                  style: tt.bodySmall?.copyWith(color: atlas.textSecondary),
+                ),
+              ),
+            ],
+          ),
+          if (hasJourneys) ...[
+            const SizedBox(height: 14),
+            _ActionButton(
+              label: 'Buy tickets',
+              icon: Icons.confirmation_num_outlined,
+              filled: true,
+              onPressed: () => _launchExternal(_ticketWebsiteUriForResult(result)),
             ),
           ],
         ],
@@ -547,6 +941,9 @@ class _PublicTransportJourneyList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
     final options = result.journeyOptions.take(3).toList(growable: false);
 
     if (options.isEmpty) {
@@ -556,11 +953,10 @@ class _PublicTransportJourneyList extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'Atlas keeps transit fast, but still surfaces the lower-carbon option clearly.',
-          style: TextStyle(
-            fontSize: 13,
-            color: Color(0xFF6B6E6A),
+          style: tt.bodySmall?.copyWith(
+            color: atlas.textSecondary,
             height: 1.35,
           ),
         ),
@@ -633,14 +1029,13 @@ class _TransitJourneyRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primaryText = Color(0xFF1F1F1F);
-    const secondaryText = Color(0xFF6B6E6A);
-    const border = Color(0xFFE3E4DE);
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
 
     final displayLegs = option.plan.displayLegs;
 
     return Material(
-      color: Colors.white.withOpacity(0.7),
+      color: atlas.surface.withOpacity(0.82),
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
@@ -659,22 +1054,33 @@ class _TransitJourneyRow extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
           decoration: BoxDecoration(
-            border: Border.all(color: border),
+            border: Border.all(color: atlas.border),
             borderRadius: BorderRadius.circular(18),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SizedBox(
-                width: 78,
-                child: Text(
-                  _formatMinutes(option.plan.effectiveDurationMinutes),
-                  style: const TextStyle(
-                    fontSize: 24,
-                    height: 1.0,
-                    fontWeight: FontWeight.w500,
-                    color: primaryText,
-                  ),
+                width: 82,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _formatMinutes(option.plan.effectiveDurationMinutes),
+                      style: tt.headlineSmall?.copyWith(
+                        color: atlas.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        height: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Total',
+                      style: tt.labelSmall?.copyWith(
+                        color: atlas.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 12),
@@ -684,10 +1090,9 @@ class _TransitJourneyRow extends StatelessWidget {
                   children: [
                     Text(
                       _timeRangeLabel(option.plan),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w400,
-                        color: primaryText,
+                      style: tt.titleMedium?.copyWith(
+                        color: atlas.textPrimary,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -717,10 +1122,9 @@ class _TransitJourneyRow extends StatelessWidget {
                     const SizedBox(height: 10),
                     Text(
                       _footerText(),
-                      style: const TextStyle(
-                        fontSize: 13,
+                      style: tt.bodySmall?.copyWith(
+                        color: atlas.textSecondary,
                         height: 1.3,
-                        color: secondaryText,
                       ),
                     ),
                   ],
@@ -740,16 +1144,18 @@ class _TransitJourneyRow extends StatelessWidget {
       widgets.add(_JourneyLegChip(leg: legs[i]));
 
       if (i != legs.length - 1) {
-        widgets.add(const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 2),
-          child: Text(
-            '›',
-            style: TextStyle(
-              fontSize: 16,
-              color: Color(0xFF6B6E6A),
+        widgets.add(
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 2),
+            child: Text(
+              '›',
+              style: TextStyle(
+                fontSize: 16,
+                color: Color(0xFF6B6E6A),
+              ),
             ),
           ),
-        ));
+        );
       }
     }
 
@@ -806,32 +1212,27 @@ class TransitJourneyDetailsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const bg = Color(0xFFF7F6F2);
-    const primaryText = Color(0xFF1F1F1F);
-    const secondaryText = Color(0xFF6B6E6A);
-    const border = Color(0xFFE3E4DE);
-    const accent = Color(0xFF9FC8B2);
-
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
     final steps = option.plan.displaySteps;
 
     return Scaffold(
-      backgroundColor: bg,
+      backgroundColor: atlas.background,
       appBar: AppBar(
-        backgroundColor: bg,
+        backgroundColor: atlas.background,
+        foregroundColor: atlas.textPrimary,
         elevation: 0,
-        surfaceTintColor: bg,
-        iconTheme: const IconThemeData(color: primaryText),
+        surfaceTintColor: atlas.background,
         title: Text(
           destinationName,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w400,
-            color: primaryText,
+          style: tt.titleLarge?.copyWith(
+            color: atlas.textPrimary,
+            fontWeight: FontWeight.w700,
           ),
         ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: border),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: atlas.border),
         ),
       ),
       body: ListView(
@@ -840,16 +1241,23 @@ class TransitJourneyDetailsScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
-              color: accent.withOpacity(0.16),
+              color: atlas.surfaceFeatured,
               borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: border),
+              border: Border.all(color: atlas.border),
+              boxShadow: const [
+                BoxShadow(
+                  blurRadius: 16,
+                  offset: Offset(0, 6),
+                  color: Color(0x12000000),
+                ),
+              ],
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
+                  spacing: 10,
+                  runSpacing: 10,
                   children: [
                     _TopMetric(
                       label: 'Time',
@@ -872,20 +1280,18 @@ class TransitJourneyDetailsScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 Text(
                   option.plan.routeHeadline,
-                  style: const TextStyle(
-                    fontSize: 18,
+                  style: tt.titleLarge?.copyWith(
+                    color: atlas.textPrimary,
+                    fontWeight: FontWeight.w700,
                     height: 1.3,
-                    fontWeight: FontWeight.w600,
-                    color: primaryText,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   _ecoInsight(),
-                  style: const TextStyle(
-                    fontSize: 14,
+                  style: tt.bodyMedium?.copyWith(
+                    color: atlas.textSecondary,
                     height: 1.35,
-                    color: secondaryText,
                   ),
                 ),
                 const SizedBox(height: 18),
@@ -896,7 +1302,6 @@ class TransitJourneyDetailsScreen extends StatelessWidget {
                     child: _TransportStepTile(
                       stepNumber: index + 1,
                       step: steps[index],
-                      accent: accent,
                     ),
                   ),
                 ),
@@ -921,7 +1326,7 @@ class TransitJourneyDetailsScreen extends StatelessWidget {
     final remainder = minutes % 60;
 
     if (hours <= 0) {
-      return '${minutes} min';
+      return '$minutes min';
     }
     if (remainder == 0) {
       return '${hours}h';
@@ -950,9 +1355,8 @@ class _JourneyLegChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primaryText = Color(0xFF1F1F1F);
-    const border = Color(0xFFE3E4DE);
-    const accent = Color(0xFF9FC8B2);
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
 
     final filled = leg.type != TransitLegType.walk;
 
@@ -962,9 +1366,11 @@ class _JourneyLegChip extends StatelessWidget {
         vertical: 6,
       ),
       decoration: BoxDecoration(
-        color: filled ? accent.withOpacity(0.22) : Colors.white,
+        color: filled
+            ? atlas.brandTertiary.withOpacity(0.24)
+            : atlas.surface.withOpacity(0.9),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: border),
+        border: Border.all(color: atlas.border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -972,15 +1378,15 @@ class _JourneyLegChip extends StatelessWidget {
           Icon(
             _iconForStep(leg.type),
             size: 17,
-            color: primaryText,
+            color: atlas.textPrimary,
           ),
           const SizedBox(width: 6),
           Text(
             leg.chipLabel,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: primaryText,
+            style: tt.labelLarge?.copyWith(
+              fontSize: 13,
+              color: atlas.textPrimary,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -1000,23 +1406,23 @@ class _InlinePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primaryText = Color(0xFF1F1F1F);
-    const border = Color(0xFFE3E4DE);
-    const accent = Color(0xFF9FC8B2);
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: filled ? accent.withOpacity(0.24) : Colors.white.withOpacity(0.75),
+        color: filled
+            ? atlas.brandHighlight.withOpacity(0.95)
+            : atlas.surface.withOpacity(0.82),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: border),
+        border: Border.all(color: atlas.border),
       ),
       child: Text(
         label,
-        style: const TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-          color: primaryText,
+        style: tt.labelMedium?.copyWith(
+          color: atlas.textPrimary,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -1034,45 +1440,17 @@ class _TopMetric extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primaryText = Color(0xFF1F1F1F);
-    const secondaryText = Color(0xFF6B6E6A);
-
-    return SizedBox(
-      width: 130,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: secondaryText,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
-              color: primaryText,
-            ),
-          ),
-        ],
-      ),
-    );
+    return _MetricTile(label: label, value: value);
   }
 }
 
 class _TransportStepTile extends StatelessWidget {
   final int stepNumber;
   final TransitJourneyDisplayStep step;
-  final Color accent;
 
   const _TransportStepTile({
     required this.stepNumber,
     required this.step,
-    required this.accent,
   });
 
   IconData _iconForStep(TransitLegType type) {
@@ -1088,15 +1466,14 @@ class _TransportStepTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const primaryText = Color(0xFF1F1F1F);
-    const secondaryText = Color(0xFF6B6E6A);
-    const border = Color(0xFFE3E4DE);
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.75),
-        border: Border.all(color: border),
+        color: atlas.surface.withOpacity(0.88),
+        border: Border.all(color: atlas.border),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -1106,16 +1483,16 @@ class _TransportStepTile extends StatelessWidget {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: accent.withOpacity(0.28),
+              color: atlas.brandTertiary.withOpacity(0.28),
               shape: BoxShape.circle,
             ),
             alignment: Alignment.center,
             child: Text(
               '$stepNumber',
-              style: const TextStyle(
+              style: tt.labelLarge?.copyWith(
                 fontSize: 15,
                 fontWeight: FontWeight.w700,
-                color: primaryText,
+                color: atlas.textPrimary,
               ),
             ),
           ),
@@ -1123,28 +1500,26 @@ class _TransportStepTile extends StatelessWidget {
           Icon(
             _iconForStep(step.type),
             size: 22,
-            color: primaryText,
+            color: atlas.textPrimary,
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Next step',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: secondaryText,
+                  style: tt.labelMedium?.copyWith(
+                    color: atlas.textSecondary,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   step.title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: primaryText,
+                  style: tt.titleMedium?.copyWith(
+                    color: atlas.textPrimary,
+                    fontWeight: FontWeight.w700,
                     height: 1.3,
                   ),
                 ),
@@ -1152,9 +1527,8 @@ class _TransportStepTile extends StatelessWidget {
                   const SizedBox(height: 5),
                   Text(
                     step.subtitle!,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: secondaryText,
+                    style: tt.bodySmall?.copyWith(
+                      color: atlas.textSecondary,
                       height: 1.35,
                     ),
                   ),
@@ -1168,44 +1542,133 @@ class _TransportStepTile extends StatelessWidget {
   }
 }
 
-class Metric extends StatelessWidget {
+class _MetricTile extends StatelessWidget {
   final String label;
   final String value;
 
-  const Metric({
-    super.key,
+  const _MetricTile({
     required this.label,
     required this.value,
   });
 
   @override
   Widget build(BuildContext context) {
-    const primaryText = Color(0xFF1F1F1F);
-    const secondaryText = Color(0xFF6B6E6A);
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w400,
-            color: secondaryText,
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: atlas.surface.withOpacity(0.75),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: atlas.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: tt.labelMedium?.copyWith(
+              color: atlas.textSecondary,
+            ),
           ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
-            color: primaryText,
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: tt.titleMedium?.copyWith(
+              color: atlas.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
+}
+
+class _TagChip extends StatelessWidget {
+  final String label;
+  final bool filled;
+
+  const _TagChip({
+    required this.label,
+    this.filled = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: filled
+            ? atlas.brandHighlight.withOpacity(0.95)
+            : atlas.brandTertiary.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: atlas.border),
+      ),
+      child: Text(
+        label,
+        style: tt.labelMedium?.copyWith(
+          color: atlas.textPrimary,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool filled;
+
+  const _ActionButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.filled = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (filled) {
+      return SizedBox(
+        height: 40,
+        child: ElevatedButton.icon(
+          onPressed: onPressed,
+          icon: Icon(icon, size: 18),
+          label: Text(label),
+        ),
+      );
+    }
+
+    return SizedBox(
+      height: 40,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 18),
+        label: Text(label),
+      ),
+    );
+  }
+}
+
+Uri _ticketWebsiteUriForResult(PublicTransportResult result) {
+  final hasTrain = result.journeyOptions.any(
+        (option) => option.plan.displayLegs.any(
+          (leg) => leg.type == TransitLegType.train,
+    ),
+  );
+
+  if (hasTrain) {
+    return Uri.https('www.nationalrail.co.uk', '/journey-planner/');
+  }
+
+  return Uri.https('www.traveline.info', '/');
 }
 
 String? _formatClock(DateTime? value) {

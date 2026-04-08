@@ -1,17 +1,9 @@
 // lib/app/screens/accountpage.dart
 import 'dart:convert';
 
+import 'package:atlas/features/themes/atlas_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-class AccountPalette {
-  static const background = Color(0xFFF7F6F2);
-  static const primaryText = Color(0xFF1F1F1F);
-  static const secondaryText = Color(0xFF6B6E6A);
-  static const accent = Color(0xFF9FC8B2);
-  static const divider = Color(0xFFE3E4DE);
-  static const destructive = Color(0xFFB85C5C);
-}
 
 enum DistanceUnit { kilometres, miles }
 
@@ -44,10 +36,8 @@ class AccountSettings {
     DistanceUnit? distanceUnit,
   }) {
     return AccountSettings(
-      notificationsEnabled:
-      notificationsEnabled ?? this.notificationsEnabled,
-      voiceGuidanceEnabled:
-      voiceGuidanceEnabled ?? this.voiceGuidanceEnabled,
+      notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
+      voiceGuidanceEnabled: voiceGuidanceEnabled ?? this.voiceGuidanceEnabled,
       avoidTolls: avoidTolls ?? this.avoidTolls,
       avoidMotorways: avoidMotorways ?? this.avoidMotorways,
       hapticsEnabled: hapticsEnabled ?? this.hapticsEnabled,
@@ -122,7 +112,9 @@ class _AccountPageState extends State<AccountPage> {
   }
 
   String get _distanceLabel {
-    return _settings.distanceUnit == DistanceUnit.miles ? 'Miles' : 'Kilometres';
+    return _settings.distanceUnit == DistanceUnit.miles
+        ? 'Miles'
+        : 'Kilometres';
   }
 
   @override
@@ -195,40 +187,39 @@ class _AccountPageState extends State<AccountPage> {
   }
 
   Future<void> _resetSettings() async {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
-          backgroundColor: AccountPalette.background,
-          title: const Text(
+          backgroundColor: atlas.background,
+          title: Text(
             'Reset settings',
-            style: TextStyle(
-              color: AccountPalette.primaryText,
-              fontWeight: FontWeight.w400,
+            style: tt.titleLarge?.copyWith(
+              color: atlas.textPrimary,
+              fontWeight: FontWeight.w700,
             ),
           ),
-          content: const Text(
+          content: Text(
             'This will restore all account and app settings to their defaults.',
-            style: TextStyle(
-              color: AccountPalette.secondaryText,
-              fontWeight: FontWeight.w400,
+            style: tt.bodyMedium?.copyWith(
+              color: atlas.textSecondary,
             ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
                 'Cancel',
-                style: TextStyle(color: AccountPalette.secondaryText),
+                style: tt.labelLarge?.copyWith(
+                  color: atlas.textSecondary,
+                ),
               ),
             ),
             ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AccountPalette.accent,
-                foregroundColor: AccountPalette.primaryText,
-                elevation: 0,
-              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
               child: const Text('Reset'),
             ),
           ],
@@ -270,13 +261,15 @@ class _AccountPageState extends State<AccountPage> {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+
     return Scaffold(
-      backgroundColor: AccountPalette.background,
+      backgroundColor: atlas.background,
       body: SafeArea(
         child: _loading
-            ? const Center(
+            ? Center(
           child: CircularProgressIndicator(
-            color: AccountPalette.primaryText,
+            color: atlas.brandPrimary,
             strokeWidth: 2,
           ),
         )
@@ -296,29 +289,7 @@ class _AccountPageState extends State<AccountPage> {
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Account',
-                                style: TextStyle(
-                                  fontSize: 28,
-                                  height: 1.0,
-                                  fontWeight: FontWeight.w400,
-                                  color: AccountPalette.primaryText,
-                                ),
-                              ),
-                              SizedBox(height: 4),
-                              Text(
-                                'Manage your app settings and route preferences.',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w400,
-                                  color: AccountPalette.secondaryText,
-                                ),
-                              ),
-                            ],
-                          ),
+                          child: _AccountHeader(),
                         ),
                       ],
                     ),
@@ -373,8 +344,7 @@ class _AccountPageState extends State<AccountPage> {
                           onFirstPressed: () {
                             _updateSettings(
                               _settings.copyWith(
-                                distanceUnit:
-                                DistanceUnit.kilometres,
+                                distanceUnit: DistanceUnit.kilometres,
                               ),
                             );
                           },
@@ -516,6 +486,36 @@ class _AccountPageState extends State<AccountPage> {
   }
 }
 
+class _AccountHeader extends StatelessWidget {
+  const _AccountHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Account',
+          style: tt.headlineSmall?.copyWith(
+            color: atlas.textPrimary,
+            height: 1.0,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Manage your app settings and route preferences.',
+          style: tt.bodySmall?.copyWith(
+            color: atlas.textSecondary,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _AccountSummaryCard extends StatelessWidget {
   final int savedPlacesCount;
   final bool hasHome;
@@ -531,12 +531,15 @@ class _AccountSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.6),
+        color: atlas.surfaceFeatured,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AccountPalette.divider),
+        border: Border.all(color: atlas.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -547,35 +550,32 @@ class _AccountSummaryCard extends StatelessWidget {
                 width: 54,
                 height: 54,
                 decoration: BoxDecoration(
-                  color: AccountPalette.accent.withOpacity(0.55),
+                  color: atlas.brandTertiary.withOpacity(0.45),
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.person_outline_rounded,
-                  color: AccountPalette.primaryText,
+                  color: atlas.textPrimary,
                   size: 28,
                 ),
               ),
               const SizedBox(width: 14),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'Atlas account',
-                      style: TextStyle(
+                      style: tt.titleLarge?.copyWith(
+                        color: atlas.textPrimary,
                         fontSize: 18,
-                        fontWeight: FontWeight.w400,
-                        color: AccountPalette.primaryText,
                       ),
                     ),
-                    SizedBox(height: 4),
+                    const SizedBox(height: 4),
                     Text(
                       'Personalise routes, app behaviour, and saved places.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w400,
-                        color: AccountPalette.secondaryText,
+                      style: tt.bodySmall?.copyWith(
+                        color: atlas.textSecondary,
                       ),
                     ),
                   ],
@@ -619,12 +619,14 @@ class _SectionLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
     return Text(
       text,
-      style: const TextStyle(
+      style: tt.labelMedium?.copyWith(
         fontSize: 13,
-        fontWeight: FontWeight.w400,
-        color: AccountPalette.secondaryText,
+        color: atlas.textSecondary,
       ),
     );
   }
@@ -637,11 +639,13 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.45),
+        color: atlas.surface.withOpacity(0.6),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AccountPalette.divider),
+        border: Border.all(color: atlas.border),
       ),
       child: Column(children: children),
     );
@@ -653,10 +657,12 @@ class _CardDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Divider(
+    final atlas = context.atlas;
+
+    return Divider(
       height: 1,
       thickness: 1,
-      color: AccountPalette.divider,
+      color: atlas.border,
     );
   }
 }
@@ -676,6 +682,8 @@ class _SwitchSettingTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
       child: Row(
@@ -689,8 +697,10 @@ class _SwitchSettingTile extends StatelessWidget {
           const SizedBox(width: 12),
           Switch.adaptive(
             value: value,
-            activeColor: AccountPalette.primaryText,
-            activeTrackColor: AccountPalette.accent,
+            activeColor: Colors.white,
+            activeTrackColor: atlas.brandPrimary,
+            inactiveThumbColor: atlas.surface,
+            inactiveTrackColor: atlas.border,
             onChanged: onChanged,
           ),
         ],
@@ -774,9 +784,11 @@ class _ActionSettingTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final titleColor = isDestructive
-        ? AccountPalette.destructive
-        : AccountPalette.primaryText;
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    final titleColor = isDestructive ? atlas.danger : atlas.textPrimary;
+    final trailingColor = isDestructive ? atlas.danger : atlas.textSecondary;
 
     return Material(
       color: Colors.transparent,
@@ -797,12 +809,9 @@ class _ActionSettingTile extends StatelessWidget {
               const SizedBox(width: 12),
               Text(
                 trailingLabel,
-                style: TextStyle(
+                style: tt.labelMedium?.copyWith(
                   fontSize: 13,
-                  fontWeight: FontWeight.w400,
-                  color: isDestructive
-                      ? AccountPalette.destructive
-                      : AccountPalette.secondaryText,
+                  color: trailingColor,
                 ),
               ),
             ],
@@ -826,6 +835,9 @@ class _StaticInfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Row(
@@ -839,10 +851,9 @@ class _StaticInfoTile extends StatelessWidget {
           const SizedBox(width: 12),
           Text(
             trailingLabel,
-            style: const TextStyle(
+            style: tt.labelMedium?.copyWith(
               fontSize: 13,
-              fontWeight: FontWeight.w400,
-              color: AccountPalette.secondaryText,
+              color: atlas.textSecondary,
             ),
           ),
         ],
@@ -864,25 +875,26 @@ class _TileText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          style: TextStyle(
+          style: tt.titleMedium?.copyWith(
             fontSize: 15,
-            fontWeight: FontWeight.w400,
-            color: titleColor ?? AccountPalette.primaryText,
+            color: titleColor ?? atlas.textPrimary,
           ),
         ),
         const SizedBox(height: 3),
         Text(
           subtitle,
-          style: const TextStyle(
+          style: tt.bodySmall?.copyWith(
             fontSize: 13,
             height: 1.25,
-            fontWeight: FontWeight.w400,
-            color: AccountPalette.secondaryText,
+            color: atlas.textSecondary,
           ),
         ),
       ],
@@ -901,31 +913,32 @@ class _SummaryPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.7),
+        color: atlas.surface.withOpacity(0.8),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AccountPalette.divider),
+        border: Border.all(color: atlas.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             value,
-            style: const TextStyle(
+            style: tt.titleMedium?.copyWith(
               fontSize: 15,
-              fontWeight: FontWeight.w400,
-              color: AccountPalette.primaryText,
+              color: atlas.textPrimary,
             ),
           ),
           const SizedBox(height: 2),
           Text(
             label,
-            style: const TextStyle(
+            style: tt.labelSmall?.copyWith(
               fontSize: 12,
-              fontWeight: FontWeight.w400,
-              color: AccountPalette.secondaryText,
+              color: atlas.textSecondary,
             ),
           ),
         ],
@@ -947,10 +960,13 @@ class _OptionChipButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
     return Material(
       color: selected
-          ? AccountPalette.accent.withOpacity(0.8)
-          : Colors.white.withOpacity(0.7),
+          ? atlas.brandHighlight
+          : atlas.surface.withOpacity(0.8),
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
@@ -959,15 +975,16 @@ class _OptionChipButton extends StatelessWidget {
           height: 46,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AccountPalette.divider),
+            border: Border.all(
+              color: selected ? atlas.brandPrimary : atlas.border,
+            ),
           ),
           alignment: Alignment.center,
           child: Text(
             label,
-            style: const TextStyle(
+            style: tt.labelLarge?.copyWith(
               fontSize: 15,
-              fontWeight: FontWeight.w400,
-              color: AccountPalette.primaryText,
+              color: atlas.textPrimary,
             ),
           ),
         ),
@@ -987,11 +1004,13 @@ class _IconSurfaceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+
     return Material(
-      color: Colors.white.withOpacity(0.75),
+      color: atlas.surface.withOpacity(0.8),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: AccountPalette.divider),
+        side: BorderSide(color: atlas.border),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -1001,7 +1020,7 @@ class _IconSurfaceButton extends StatelessWidget {
           height: 48,
           child: Icon(
             icon,
-            color: AccountPalette.primaryText,
+            color: atlas.textPrimary,
             size: 20,
           ),
         ),

@@ -1,9 +1,9 @@
-// lib/screens/home/home_screen.dart
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import 'package:atlas/app/screens/route_options_screen.dart';
+import 'package:atlas/features/themes/atlas_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,14 +11,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'accountpage.dart';
 import '../../features/routes/directions.dart';
 import '../../features/search/place_search.dart';
-
-class AtlasPalette {
-  static const background = Color(0xFFF7F6F2);
-  static const primaryText = Color(0xFF1F1F1F);
-  static const secondaryText = Color(0xFF6B6E6A);
-  static const accent = Color(0xFF9FC8B2);
-  static const divider = Color(0xFFE3E4DE);
-}
 
 class SavedFavorite {
   final String id;
@@ -215,10 +207,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _pickDepartureTime() async {
+    final atlas = context.atlas;
+    final baseTheme = Theme.of(context);
     final now = DateTime.now();
     final initial = _departureTime != null && _departureTime!.isAfter(now)
         ? _departureTime!
         : now.add(const Duration(minutes: 15));
+
+    final pickerTheme = baseTheme.copyWith(
+      colorScheme: baseTheme.colorScheme.copyWith(
+        primary: atlas.brandPrimary,
+        onPrimary: Colors.white,
+        surface: atlas.background,
+        onSurface: atlas.textPrimary,
+      ),
+      dialogBackgroundColor: atlas.background,
+    );
 
     final pickedDate = await showDatePicker(
       context: context,
@@ -227,14 +231,7 @@ class _HomeScreenState extends State<HomeScreen> {
       lastDate: now.add(const Duration(days: 365)),
       builder: (context, child) {
         return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: AtlasPalette.accent,
-              onPrimary: AtlasPalette.primaryText,
-              surface: AtlasPalette.background,
-              onSurface: AtlasPalette.primaryText,
-            ),
-          ),
+          data: pickerTheme,
           child: child!,
         );
       },
@@ -249,14 +246,7 @@ class _HomeScreenState extends State<HomeScreen> {
       initialTime: TimeOfDay.fromDateTime(initial),
       builder: (context, child) {
         return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: AtlasPalette.accent,
-              onPrimary: AtlasPalette.primaryText,
-              surface: AtlasPalette.background,
-              onSurface: AtlasPalette.primaryText,
-            ),
-          ),
+          data: pickerTheme,
           child: child!,
         );
       },
@@ -294,8 +284,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+
     return Scaffold(
-      backgroundColor: AtlasPalette.background,
+      backgroundColor: atlas.background,
       body: Stack(
         children: [
           AppleMap(
@@ -841,19 +833,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<String?> _promptForFavoriteName() async {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
     final controller = TextEditingController();
 
     final value = await showDialog<String>(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
-          backgroundColor: AtlasPalette.background,
-          title: const Text(
+          backgroundColor: atlas.background,
+          title: Text(
             'New favourite',
-            style: TextStyle(
-              color: AtlasPalette.primaryText,
-              fontWeight: FontWeight.w400,
-            ),
+            style: tt.titleLarge?.copyWith(color: atlas.textPrimary),
           ),
           content: TextField(
             controller: controller,
@@ -861,18 +852,18 @@ class _HomeScreenState extends State<HomeScreen> {
             textInputAction: TextInputAction.done,
             decoration: InputDecoration(
               hintText: 'Name',
-              hintStyle: TextStyle(
-                color: AtlasPalette.secondaryText.withOpacity(0.8),
+              hintStyle: tt.bodyMedium?.copyWith(
+                color: atlas.textSecondary.withOpacity(0.8),
               ),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.6),
+              fillColor: atlas.surface.withOpacity(0.9),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: AtlasPalette.divider),
+                borderSide: BorderSide(color: atlas.border),
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
-                borderSide: const BorderSide(color: AtlasPalette.accent),
+                borderSide: BorderSide(color: atlas.brandPrimary),
               ),
             ),
             onSubmitted: (value) {
@@ -880,15 +871,15 @@ class _HomeScreenState extends State<HomeScreen> {
               if (trimmed.isEmpty) {
                 return;
               }
-              Navigator.of(context).pop(trimmed);
+              Navigator.of(dialogContext).pop(trimmed);
             },
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(
                 'Cancel',
-                style: TextStyle(color: AtlasPalette.secondaryText),
+                style: tt.labelLarge?.copyWith(color: atlas.textSecondary),
               ),
             ),
             ElevatedButton(
@@ -897,13 +888,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (trimmed.isEmpty) {
                   return;
                 }
-                Navigator.of(context).pop(trimmed);
+                Navigator.of(dialogContext).pop(trimmed);
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AtlasPalette.accent,
-                foregroundColor: AtlasPalette.primaryText,
-                elevation: 0,
-              ),
               child: const Text('Next'),
             ),
           ],
@@ -947,10 +933,12 @@ class _SearchPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
     final hasTrailing = trailingIcon != null;
 
     return Material(
-      color: Colors.white.withOpacity(0.78),
+      color: atlas.surface.withOpacity(0.78),
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
         borderRadius: BorderRadius.circular(18),
@@ -959,22 +947,21 @@ class _SearchPill extends StatelessWidget {
           height: 54,
           padding: const EdgeInsets.symmetric(horizontal: 14),
           decoration: BoxDecoration(
-            border: Border.all(color: AtlasPalette.divider),
+            border: Border.all(color: atlas.border),
             borderRadius: BorderRadius.circular(18),
           ),
           child: Row(
             children: [
-              Icon(leadingIcon, color: AtlasPalette.secondaryText),
+              Icon(leadingIcon, color: atlas.textSecondary),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   placeholder,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
+                  style: tt.bodyLarge?.copyWith(
+                    color: atlas.textPrimary,
                     fontWeight: FontWeight.w400,
-                    color: AtlasPalette.primaryText,
                   ),
                 ),
               ),
@@ -987,15 +974,15 @@ class _SearchPill extends StatelessWidget {
                     child: Icon(
                       trailingIcon,
                       size: trailingIcon == Icons.close_rounded ? 20 : 16,
-                      color: AtlasPalette.secondaryText,
+                      color: atlas.textSecondary,
                     ),
                   ),
                 )
               else
-                const Icon(
+                Icon(
                   Icons.arrow_forward_ios_rounded,
                   size: 16,
-                  color: AtlasPalette.secondaryText,
+                  color: atlas.textSecondary,
                 ),
             ],
           ),
@@ -1016,11 +1003,13 @@ class _RoundIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+
     return Material(
-      color: Colors.white.withOpacity(0.85),
+      color: atlas.surface.withOpacity(0.85),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: AtlasPalette.divider),
+        side: BorderSide(color: atlas.border),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -1028,7 +1017,7 @@ class _RoundIconButton extends StatelessWidget {
         child: SizedBox(
           width: 52,
           height: 52,
-          child: Icon(icon, color: AtlasPalette.primaryText),
+          child: Icon(icon, color: atlas.textPrimary),
         ),
       ),
     );
@@ -1079,6 +1068,8 @@ class _HomeBottomSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
     final hasSelection = selectedPlaceName != null;
 
     return DraggableScrollableSheet(
@@ -1090,10 +1081,10 @@ class _HomeBottomSheet extends StatelessWidget {
       snapSizes: const [0.34, 0.55, 0.78],
       builder: (context, scrollController) {
         return Container(
-          decoration: const BoxDecoration(
-            color: AtlasPalette.background,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-            boxShadow: [
+          decoration: BoxDecoration(
+            color: atlas.background,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+            boxShadow: const [
               BoxShadow(
                 blurRadius: 24,
                 offset: Offset(0, -8),
@@ -1110,7 +1101,7 @@ class _HomeBottomSheet extends StatelessWidget {
                   width: 42,
                   height: 5,
                   decoration: BoxDecoration(
-                    color: AtlasPalette.divider,
+                    color: atlas.border,
                     borderRadius: BorderRadius.circular(999),
                   ),
                 ),
@@ -1118,11 +1109,10 @@ class _HomeBottomSheet extends StatelessWidget {
               const SizedBox(height: 14),
               Text(
                 hasSelection ? 'Destination' : 'Plan a journey',
-                style: const TextStyle(
+                style: tt.titleLarge?.copyWith(
                   fontSize: 20,
-                  height: 1.1,
-                  fontWeight: FontWeight.w400,
-                  color: AtlasPalette.primaryText,
+                  fontWeight: FontWeight.w700,
+                  color: atlas.textPrimary,
                 ),
               ),
               const SizedBox(height: 8),
@@ -1130,11 +1120,10 @@ class _HomeBottomSheet extends StatelessWidget {
                 hasSelection
                     ? selectedPlaceName!
                     : 'Choose a place to see the best options.',
-                style: const TextStyle(
+                style: tt.bodySmall?.copyWith(
                   fontSize: 14,
                   height: 1.25,
-                  fontWeight: FontWeight.w400,
-                  color: AtlasPalette.secondaryText,
+                  color: atlas.textSecondary,
                 ),
               ),
               const SizedBox(height: 14),
@@ -1178,17 +1167,16 @@ class _HomeBottomSheet extends StatelessWidget {
                   isDisabledWhenNull: true,
                 ),
               const SizedBox(height: 14),
-              const Divider(height: 1, color: AtlasPalette.divider),
+              Divider(height: 1, color: atlas.border),
               const SizedBox(height: 12),
               Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
                       'Favourite places',
-                      style: TextStyle(
+                      style: tt.labelMedium?.copyWith(
                         fontSize: 13,
-                        fontWeight: FontWeight.w400,
-                        color: AtlasPalette.secondaryText,
+                        color: atlas.textSecondary,
                       ),
                     ),
                   ),
@@ -1227,12 +1215,11 @@ class _HomeBottomSheet extends StatelessWidget {
                 ),
                 if (customFavorites.isNotEmpty) ...[
                   const SizedBox(height: 14),
-                  const Text(
+                  Text(
                     'Saved favourites',
-                    style: TextStyle(
+                    style: tt.labelMedium?.copyWith(
                       fontSize: 13,
-                      fontWeight: FontWeight.w400,
-                      color: AtlasPalette.secondaryText,
+                      color: atlas.textSecondary,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -1275,6 +1262,8 @@ class _PrimaryButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final atlas = context.atlas;
     final disabled = isDisabledWhenNull && onPressed == null;
 
     return SizedBox(
@@ -1282,9 +1271,9 @@ class _PrimaryButton extends StatelessWidget {
       child: ElevatedButton(
         onPressed: disabled ? null : onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: AtlasPalette.accent,
-          disabledBackgroundColor: AtlasPalette.divider,
-          foregroundColor: AtlasPalette.primaryText,
+          backgroundColor: atlas.brandPrimary,
+          disabledBackgroundColor: atlas.border,
+          foregroundColor: Colors.white,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -1292,9 +1281,10 @@ class _PrimaryButton extends StatelessWidget {
         ),
         child: Text(
           label,
-          style: const TextStyle(
+          style: tt.labelLarge?.copyWith(
+            color: Colors.white,
             fontSize: 16,
-            fontWeight: FontWeight.w400,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ),
@@ -1309,8 +1299,10 @@ class _HeaderAddButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+
     return Material(
-      color: Colors.white.withOpacity(0.7),
+      color: atlas.surface.withOpacity(0.7),
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -1319,13 +1311,13 @@ class _HeaderAddButton extends StatelessWidget {
           width: 34,
           height: 34,
           decoration: BoxDecoration(
-            border: Border.all(color: AtlasPalette.divider),
+            border: Border.all(color: atlas.border),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: const Icon(
+          child: Icon(
             Icons.add_rounded,
             size: 20,
-            color: AtlasPalette.primaryText,
+            color: atlas.textPrimary,
           ),
         ),
       ),
@@ -1352,8 +1344,13 @@ class _FavouriteRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme
+        .of(context)
+        .textTheme;
+
     return Material(
-      color: Colors.white.withOpacity(0.45),
+      color: atlas.surface.withOpacity(0.45),
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -1361,12 +1358,12 @@ class _FavouriteRow extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            border: Border.all(color: AtlasPalette.divider),
+            border: Border.all(color: atlas.border),
             borderRadius: BorderRadius.circular(16),
           ),
           child: Row(
             children: [
-              Icon(leadingIcon, color: AtlasPalette.secondaryText),
+              Icon(leadingIcon, color: atlas.textSecondary),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -1374,10 +1371,10 @@ class _FavouriteRow extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: tt.titleMedium?.copyWith(
                         fontSize: 15,
-                        fontWeight: FontWeight.w400,
-                        color: AtlasPalette.primaryText,
+                        fontWeight: FontWeight.w700,
+                        color: atlas.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -1385,10 +1382,9 @@ class _FavouriteRow extends StatelessWidget {
                       subtitle,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: tt.bodySmall?.copyWith(
                         fontSize: 13,
-                        fontWeight: FontWeight.w400,
-                        color: AtlasPalette.secondaryText,
+                        color: atlas.textSecondary,
                       ),
                     ),
                   ],
@@ -1400,13 +1396,13 @@ class _FavouriteRow extends StatelessWidget {
                   splashRadius: 18,
                   icon: Icon(
                     trailingIcon,
-                    color: AtlasPalette.secondaryText,
+                    color: atlas.textSecondary,
                   ),
                 )
               else
-                const Icon(
+                Icon(
                   Icons.chevron_right,
-                  color: AtlasPalette.secondaryText,
+                  color: atlas.textSecondary,
                 ),
             ],
           ),

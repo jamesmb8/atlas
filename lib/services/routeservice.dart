@@ -1,12 +1,22 @@
-// lib/services/routeoptionsservice.dart
-// Replace only the transit duration/tag parts inside buildOptions.
 
+
+// lib/services/routeservice.dart
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 
 import '../features/routes/route_option.dart';
 import 'applerouteservice.dart';
 import 'co2service.dart';
 import 'transitrouteservice.dart';
+
+class RouteOptionsBuildResult {
+  final List<RouteOption> options;
+  final PublicTransportResult? publicTransportResult;
+
+  const RouteOptionsBuildResult({
+    required this.options,
+    required this.publicTransportResult,
+  });
+}
 
 class RouteOptionsService {
   final AppleRouteService _appleRouteService;
@@ -21,30 +31,41 @@ class RouteOptionsService {
         _transitRouteService = transitRouteService ?? TransitRouteService(),
         _co2Service = co2Service ?? const Co2Service();
 
-  Future<List<RouteOption>> buildOptions({
+  Future<RouteOptionsBuildResult> buildOptions({
     required LatLng? origin,
     required LatLng destination,
     required String destinationName,
+    DateTime? departureTime,
   }) async {
-    if (origin == null) return const [];
+    if (origin == null) {
+      return const RouteOptionsBuildResult(
+        options: [],
+        publicTransportResult: null,
+      );
+    }
 
     final options = <RouteOption>[];
 
-    final walking = await _appleRouteService.getWalkingRoute(
+    final walkingFuture = _appleRouteService.getWalkingRoute(
       origin: origin,
       destination: destination,
     );
 
-    final driving = await _appleRouteService.getDrivingRoute(
+    final drivingFuture = _appleRouteService.getDrivingRoute(
       origin: origin,
       destination: destination,
     );
 
-    final transport = await _transitRouteService.getPublicTransportSummary(
+    final transportFuture = _transitRouteService.getPublicTransportSummary(
       destinationName: destinationName,
       origin: origin,
       destination: destination,
+      departureTime: departureTime,
     );
+
+    final walking = await walkingFuture;
+    final driving = await drivingFuture;
+    final transport = await transportFuture;
 
     print(
       'Transport summary => '
@@ -62,7 +83,8 @@ class RouteOptionsService {
       final fare = transport.recommendedFare;
       final plan = recommended.journeyPlan;
       final isMixed = plan?.hasBus == true && plan?.hasTrain == true;
-      final isTrainOnly = recommended.mode == PublicTransportMode.train && !isMixed;
+      final isTrainOnly =
+          recommended.mode == PublicTransportMode.train && !isMixed;
       final totalDistance =
           recommended.totalJourneyDistanceMeters ??
               (recommended.accessDistanceMeters ?? 0);
@@ -113,7 +135,8 @@ class RouteOptionsService {
       final fare = transport.alternativeFare;
       final plan = alternative.journeyPlan;
       final isMixed = plan?.hasBus == true && plan?.hasTrain == true;
-      final isTrainOnly = alternative.mode == PublicTransportMode.train && !isMixed;
+      final isTrainOnly =
+          alternative.mode == PublicTransportMode.train && !isMixed;
       final totalDistance =
           alternative.totalJourneyDistanceMeters ??
               (alternative.accessDistanceMeters ?? 0);
@@ -187,15 +210,24 @@ class RouteOptionsService {
 
     options.sort((a, b) {
       final byPriority = a.sortPriority.compareTo(b.sortPriority);
-      if (byPriority != 0) return byPriority;
+      if (byPriority != 0) {
+        return byPriority;
+      }
 
-      if (a.mode == 'Walk' && a.durationMinutes > 30) return 1;
-      if (b.mode == 'Walk' && b.durationMinutes > 30) return -1;
+      if (a.mode == 'Walk' && a.durationMinutes > 30) {
+        return 1;
+      }
+      if (b.mode == 'Walk' && b.durationMinutes > 30) {
+        return -1;
+      }
 
       return a.durationMinutes.compareTo(b.durationMinutes);
     });
 
-    return options;
+    return RouteOptionsBuildResult(
+      options: options,
+      publicTransportResult: transport,
+    );
   }
 
   String _buildTransitDescription({
@@ -231,7 +263,9 @@ class RouteOptionsService {
 
       lines.add('');
       lines.add('Walking total: ${_formatMeters(plan.totalWalkingDistanceMeters)}');
-      lines.add('${isTrain ? 'Rail' : 'Transit'} total: ${_formatMeters(plan.totalTransitDistanceMeters)}');
+      lines.add(
+        '${isTrain ? 'Rail' : 'Transit'} total: ${_formatMeters(plan.totalTransitDistanceMeters)}',
+      );
       return lines.join('\n');
     }
 
