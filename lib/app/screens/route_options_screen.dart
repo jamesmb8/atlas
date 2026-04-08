@@ -43,6 +43,60 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
     return null;
   }
 
+  double? get _bestPublicTransportCo2Kg {
+    final journeys = _publicTransportResult?.journeyOptions;
+    if (journeys == null || journeys.isEmpty) {
+      return null;
+    }
+
+    var best = journeys.first.plan.estimatedCo2Kg;
+    for (final journey in journeys.skip(1)) {
+      if (journey.plan.estimatedCo2Kg < best) {
+        best = journey.plan.estimatedCo2Kg;
+      }
+    }
+    return best;
+  }
+
+  double? get _lowestMotorisedCo2Kg {
+    double? best;
+
+    for (final option in _options) {
+      if (_isWalkMode(option.mode)) {
+        continue;
+      }
+
+      final candidate = option.co2Kg;
+      if (best == null || candidate < best) {
+        best = candidate;
+      }
+    }
+
+    final transitBest = _bestPublicTransportCo2Kg;
+    if (!_containsPublicTransportOption(_options) && transitBest != null) {
+      if (best == null || transitBest < best) {
+        best = transitBest;
+      }
+    }
+
+    return best;
+  }
+
+  bool get _publicTransportIsEcoBest {
+    final transitCo2 = _bestPublicTransportCo2Kg;
+    final lowestMotorisedCo2 = _lowestMotorisedCo2Kg;
+
+    if (transitCo2 == null || lowestMotorisedCo2 == null) {
+      return false;
+    }
+
+    return transitCo2 <= lowestMotorisedCo2 + 0.0001;
+  }
+
+  bool _isWalkMode(String mode) {
+    return mode.trim().toLowerCase() == 'walk';
+  }
+
   bool _isPublicTransportMode(String mode) {
     final normalized = mode.trim().toLowerCase();
     return normalized == 'public transport' || normalized == 'transit';
@@ -165,7 +219,8 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
           children: [
             _ResultsHeaderCard(
               title: 'Journey options',
-              subtitle: 'Compare time, cost and CO₂ before you go.',
+              subtitle:
+              'Compare time, cost and environmental impact before you go.',
               departureLabel: _formatDepartureContext(),
               countLabel: _options.isEmpty && !showStandaloneTransitCard
                   ? 'No options yet'
@@ -197,11 +252,13 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
                     destination: widget.destination,
                     origin: widget.origin,
                     option: option,
-                    publicTransportResult:
-                    _isPublicTransportMode(option.mode)
+                    publicTransportResult: _isPublicTransportMode(option.mode)
                         ? _publicTransportResult
                         : null,
                     drivingCo2Kg: _drivingCo2Kg,
+                    showBestForEnvironmentSticker:
+                    _isPublicTransportMode(option.mode) &&
+                        _publicTransportIsEcoBest,
                   ),
                 ),
               ),
@@ -212,6 +269,8 @@ class _RouteOptionsScreenState extends State<RouteOptionsScreen> {
                     destinationName: widget.destinationName,
                     result: _publicTransportResult!,
                     drivingCo2Kg: _drivingCo2Kg,
+                    showBestForEnvironmentSticker:
+                    _publicTransportIsEcoBest,
                   ),
                 ),
             ],
@@ -344,6 +403,7 @@ class _RouteOptionCard extends StatelessWidget {
   final RouteOption option;
   final PublicTransportResult? publicTransportResult;
   final double? drivingCo2Kg;
+  final bool showBestForEnvironmentSticker;
 
   const _RouteOptionCard({
     required this.destinationName,
@@ -352,11 +412,16 @@ class _RouteOptionCard extends StatelessWidget {
     required this.option,
     this.publicTransportResult,
     this.drivingCo2Kg,
+    this.showBestForEnvironmentSticker = false,
   });
 
   bool _isPublicTransportMode(String mode) {
     final normalized = mode.trim().toLowerCase();
     return normalized == 'public transport' || normalized == 'transit';
+  }
+
+  bool _isWalkMode(String mode) {
+    return mode.trim().toLowerCase() == 'walk';
   }
 
   bool _supportsAppleMaps(String mode) {
@@ -396,10 +461,6 @@ class _RouteOptionCard extends StatelessWidget {
       return '${hours}h';
     }
     return '${hours}h ${remainder}m';
-  }
-
-  String _formatCo2(double value) {
-    return '${value.toStringAsFixed(2)} kg';
   }
 
   bool _shouldShowTime(RouteOption option) {
@@ -524,7 +585,12 @@ class _RouteOptionCard extends StatelessWidget {
     final firstTransitOption =
     transitOptions.isEmpty ? null : transitOptions.first;
 
+    final displayCo2Kg = showJourneyList && greenestTransitOption != null
+        ? greenestTransitOption.plan.estimatedCo2Kg
+        : option.co2Kg;
+
     final showTime = _shouldShowTime(option);
+    final primaryTagLabel = showJourneyList ? 'Next 3 journeys' : option.tag;
 
     final metrics = <Widget>[
       if (showJourneyList && firstTransitOption != null)
@@ -542,9 +608,7 @@ class _RouteOptionCard extends StatelessWidget {
       ),
       _MetricTile(
         label: showJourneyList ? 'Lowest CO₂' : 'CO₂',
-        value: showJourneyList && greenestTransitOption != null
-            ? _formatCo2(greenestTransitOption.plan.estimatedCo2Kg)
-            : _formatCo2(option.co2Kg),
+        value: _formatCo2Value(displayCo2Kg),
       ),
       _MetricTile(
         label: 'Distance',
@@ -568,8 +632,14 @@ class _RouteOptionCard extends StatelessWidget {
             ? atlas.surfaceFeatured
             : atlas.surface.withOpacity(0.88),
         border: Border.all(
-          color: atlas.border,
-          width: option.isFeatured ? 1.4 : 1,
+          color: showBestForEnvironmentSticker
+              ? atlas.brandHighlight.withOpacity(0.95)
+              : atlas.border,
+          width: showBestForEnvironmentSticker
+              ? 1.6
+              : option.isFeatured
+              ? 1.4
+              : 1,
         ),
         borderRadius: BorderRadius.circular(option.isFeatured ? 26 : 22),
         boxShadow: option.isFeatured
@@ -586,6 +656,7 @@ class _RouteOptionCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 width: option.isFeatured ? 44 : 40,
@@ -603,18 +674,33 @@ class _RouteOptionCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  option.mode,
-                  style: tt.titleLarge?.copyWith(
-                    color: atlas.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: option.isFeatured ? 20 : 18,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      option.mode,
+                      style: tt.titleLarge?.copyWith(
+                        color: atlas.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: option.isFeatured ? 20 : 18,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (primaryTagLabel.trim().isNotEmpty)
+                          _TagChip(
+                            label: primaryTagLabel,
+                            filled: option.isFeatured,
+                          ),
+                        if (showBestForEnvironmentSticker)
+                          const _EcoStickerChip(),
+                      ],
+                    ),
+                  ],
                 ),
-              ),
-              _TagChip(
-                label: showJourneyList ? 'Next 3 journeys' : option.tag,
-                filled: option.isFeatured,
               ),
             ],
           ),
@@ -630,6 +716,14 @@ class _RouteOptionCard extends StatelessWidget {
               ),
             )
                 .toList(growable: false),
+          ),
+          const SizedBox(height: 14),
+          _EnvironmentalImpactCard(
+            co2Kg: displayCo2Kg,
+            drivingCo2Kg: drivingCo2Kg,
+            isDriving: option.mode.trim().toLowerCase() == 'drive',
+            isWalking: _isWalkMode(option.mode),
+            highlightBest: showBestForEnvironmentSticker,
           ),
           SizedBox(height: option.isFeatured ? 16 : 14),
           if (showJourneyList)
@@ -713,11 +807,13 @@ class _StandalonePublicTransportCard extends StatelessWidget {
   final String destinationName;
   final PublicTransportResult result;
   final double? drivingCo2Kg;
+  final bool showBestForEnvironmentSticker;
 
   const _StandalonePublicTransportCard({
     required this.destinationName,
     required this.result,
     required this.drivingCo2Kg,
+    this.showBestForEnvironmentSticker = false,
   });
 
   TransitJourneyOption? _quickestOption(List<TransitJourneyOption> options) {
@@ -762,10 +858,6 @@ class _StandalonePublicTransportCard extends StatelessWidget {
     return '${hours}h ${remainder}m';
   }
 
-  String _formatCo2(double value) {
-    return '${value.toStringAsFixed(2)} kg';
-  }
-
   String _formatDistance(double meters) {
     if (meters >= 1000) {
       return '${(meters / 1000).toStringAsFixed(1)} km';
@@ -797,6 +889,7 @@ class _StandalonePublicTransportCard extends StatelessWidget {
     final firstTransitOption = hasJourneys ? transitOptions.first : null;
     final quickestTransitOption = _quickestOption(transitOptions);
     final greenestTransitOption = _greenestOption(transitOptions);
+    final displayCo2Kg = greenestTransitOption?.plan.estimatedCo2Kg;
 
     final metrics = <Widget>[
       if (hasJourneys && firstTransitOption != null)
@@ -814,8 +907,8 @@ class _StandalonePublicTransportCard extends StatelessWidget {
       ),
       _MetricTile(
         label: hasJourneys ? 'Lowest CO₂' : 'CO₂',
-        value: hasJourneys && greenestTransitOption != null
-            ? _formatCo2(greenestTransitOption.plan.estimatedCo2Kg)
+        value: hasJourneys && displayCo2Kg != null
+            ? _formatCo2Value(displayCo2Kg)
             : '—',
       ),
       _MetricTile(
@@ -830,13 +923,19 @@ class _StandalonePublicTransportCard extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: atlas.surface.withOpacity(0.88),
-        border: Border.all(color: atlas.border),
+        border: Border.all(
+          color: showBestForEnvironmentSticker
+              ? atlas.brandHighlight.withOpacity(0.95)
+              : atlas.border,
+          width: showBestForEnvironmentSticker ? 1.6 : 1,
+        ),
         borderRadius: BorderRadius.circular(22),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
                 width: 40,
@@ -854,17 +953,31 @@ class _StandalonePublicTransportCard extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  'Public transport',
-                  style: tt.titleLarge?.copyWith(
-                    color: atlas.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 18,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Public transport',
+                      style: tt.titleLarge?.copyWith(
+                        color: atlas.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 18,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _TagChip(
+                          label: hasJourneys ? 'Next 3 journeys' : 'Unavailable',
+                        ),
+                        if (showBestForEnvironmentSticker)
+                          const _EcoStickerChip(),
+                      ],
+                    ),
+                  ],
                 ),
-              ),
-              _TagChip(
-                label: hasJourneys ? 'Next 3 journeys' : 'Unavailable',
               ),
             ],
           ),
@@ -881,6 +994,16 @@ class _StandalonePublicTransportCard extends StatelessWidget {
             )
                 .toList(growable: false),
           ),
+          if (hasJourneys && displayCo2Kg != null) ...[
+            const SizedBox(height: 14),
+            _EnvironmentalImpactCard(
+              co2Kg: displayCo2Kg,
+              drivingCo2Kg: drivingCo2Kg,
+              isDriving: false,
+              isWalking: false,
+              highlightBest: showBestForEnvironmentSticker,
+            ),
+          ],
           const SizedBox(height: 14),
           if (hasJourneys)
             _PublicTransportJourneyList(
@@ -954,7 +1077,7 @@ class _PublicTransportJourneyList extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Atlas keeps transit fast, but still surfaces the lower-carbon option clearly.',
+          'Transit is surfaced clearly here because it usually cuts emissions sharply compared with driving.',
           style: tt.bodySmall?.copyWith(
             color: atlas.textSecondary,
             height: 1.35,
@@ -1001,10 +1124,6 @@ class _TransitJourneyRow extends StatelessWidget {
     return '${hours}h ${remainder}m';
   }
 
-  String _formatCo2(double value) {
-    return '${value.toStringAsFixed(2)} kg';
-  }
-
   String _footerText() {
     final parts = <String>[];
 
@@ -1013,15 +1132,18 @@ class _TransitJourneyRow extends StatelessWidget {
       parts.add('From $stop');
     }
 
-    if (drivingCo2Kg != null) {
+    if (drivingCo2Kg != null && drivingCo2Kg! > 0) {
       final saved = drivingCo2Kg! - option.plan.estimatedCo2Kg;
       if (saved > 0) {
-        parts.add('Saves ${saved.toStringAsFixed(2)} kg CO₂ vs drive');
+        final percent = ((saved / drivingCo2Kg!) * 100).round();
+        parts.add(
+          'Saves ${_formatCo2Value(saved)} CO₂ vs drive (${percent}% less)',
+        );
       }
     }
 
     if (parts.isEmpty) {
-      parts.add('Atlas eco estimate: ${_formatCo2(option.plan.estimatedCo2Kg)}');
+      parts.add('Atlas eco estimate: ${_formatCo2Value(option.plan.estimatedCo2Kg)} CO₂');
     }
 
     return parts.join(' • ');
@@ -1111,7 +1233,9 @@ class _TransitJourneyRow extends StatelessWidget {
                             label: option.tag,
                             filled: option.tag == 'Lowest CO₂',
                           ),
-                        _InlinePill(label: 'CO₂ ${_formatCo2(option.plan.estimatedCo2Kg)}'),
+                        _InlinePill(
+                          label: 'CO₂ ${_formatCo2Value(option.plan.estimatedCo2Kg)}',
+                        ),
                         _InlinePill(
                           label: option.plan.interchangeCount == 1
                               ? '1 change'
@@ -1193,21 +1317,18 @@ class TransitJourneyDetailsScreen extends StatelessWidget {
     return '${meters.toStringAsFixed(0)} m';
   }
 
-  String _formatCo2(double value) {
-    return '${value.toStringAsFixed(2)} kg';
-  }
-
   String _ecoInsight() {
-    if (drivingCo2Kg == null) {
-      return 'Atlas eco estimate: this journey produces around ${_formatCo2(option.plan.estimatedCo2Kg)}.';
+    if (drivingCo2Kg == null || drivingCo2Kg! <= 0) {
+      return 'Atlas eco estimate: this journey produces around ${_formatCo2Value(option.plan.estimatedCo2Kg)} CO₂.';
     }
 
     final saved = drivingCo2Kg! - option.plan.estimatedCo2Kg;
     if (saved <= 0) {
-      return 'Atlas eco estimate: this journey is around ${_formatCo2(option.plan.estimatedCo2Kg)}.';
+      return 'Atlas eco estimate: this journey is around ${_formatCo2Value(option.plan.estimatedCo2Kg)} CO₂.';
     }
 
-    return 'Atlas eco estimate: this saves about ${saved.toStringAsFixed(2)} kg CO₂ compared with driving.';
+    final percent = ((saved / drivingCo2Kg!) * 100).round();
+    return 'Atlas eco estimate: this saves about ${_formatCo2Value(saved)} CO₂ compared with driving (${percent}% less).';
   }
 
   @override
@@ -1265,7 +1386,7 @@ class TransitJourneyDetailsScreen extends StatelessWidget {
                     ),
                     _TopMetric(
                       label: 'CO₂',
-                      value: _formatCo2(option.plan.estimatedCo2Kg),
+                      value: _formatCo2Value(option.plan.estimatedCo2Kg),
                     ),
                     _TopMetric(
                       label: 'Distance',
@@ -1620,6 +1741,206 @@ class _TagChip extends StatelessWidget {
   }
 }
 
+class _EcoStickerChip extends StatelessWidget {
+  const _EcoStickerChip();
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: atlas.brandHighlight.withOpacity(0.95),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: atlas.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.eco_rounded,
+            size: 15,
+            color: atlas.textPrimary,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'Best for environment',
+            style: tt.labelMedium?.copyWith(
+              color: atlas.textPrimary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EnvironmentalImpactCard extends StatelessWidget {
+  final double co2Kg;
+  final double? drivingCo2Kg;
+  final bool isDriving;
+  final bool isWalking;
+  final bool highlightBest;
+
+  const _EnvironmentalImpactCard({
+    required this.co2Kg,
+    required this.drivingCo2Kg,
+    required this.isDriving,
+    required this.isWalking,
+    this.highlightBest = false,
+  });
+
+  double? _ratioToDriving() {
+    if (drivingCo2Kg == null || drivingCo2Kg! <= 0) {
+      return null;
+    }
+
+    final raw = co2Kg / drivingCo2Kg!;
+    if (raw < 0) {
+      return 0;
+    }
+    if (raw > 1) {
+      return 1;
+    }
+    return raw;
+  }
+
+  String _comparisonCopy() {
+    if (isWalking) {
+      return 'No direct tailpipe emissions for this option.';
+    }
+
+    if (drivingCo2Kg == null || drivingCo2Kg! <= 0) {
+      if (highlightBest) {
+        return 'Lowest-carbon motorised option on this screen.';
+      }
+      return 'Atlas eco estimate for this journey.';
+    }
+
+    if (isDriving) {
+      return 'Driving is the comparison baseline for the lower-carbon options.';
+    }
+
+    final saved = drivingCo2Kg! - co2Kg;
+    final percent = ((saved.abs() / drivingCo2Kg!) * 100).round();
+
+    if (saved > 0) {
+      final prefix = highlightBest
+          ? 'Lowest-carbon motorised option here. '
+          : '';
+      return '${prefix}Saves ${_formatCo2Value(saved)} CO₂ vs driving (${percent}% less).';
+    }
+
+    if (saved < 0) {
+      return '${_formatCo2Value(saved.abs())} more CO₂ than driving (${percent}% more).';
+    }
+
+    return 'About the same CO₂ as driving.';
+  }
+
+  String? _ratioLabel() {
+    if (drivingCo2Kg == null || drivingCo2Kg! <= 0) {
+      return null;
+    }
+
+    if (isDriving) {
+      return '100% of driving emissions';
+    }
+
+    final percent = ((co2Kg / drivingCo2Kg!) * 100).round();
+    return '$percent% of driving emissions';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+    final ratio = _ratioToDriving();
+    final ratioLabel = _ratioLabel();
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: atlas.surface.withOpacity(0.72),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: highlightBest
+              ? atlas.brandHighlight.withOpacity(0.95)
+              : atlas.border,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.eco_outlined,
+                size: 18,
+                color: atlas.textPrimary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Environmental impact',
+                  style: tt.labelLarge?.copyWith(
+                    color: atlas.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                _formatCo2Value(co2Kg),
+                style: tt.titleLarge?.copyWith(
+                  color: atlas.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _comparisonCopy(),
+            style: tt.bodyMedium?.copyWith(
+              color: atlas.textSecondary,
+              height: 1.35,
+            ),
+          ),
+          if (ratio != null && ratioLabel != null) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                height: 8,
+                color: atlas.border,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: ratio,
+                    child: Container(
+                      color: atlas.brandHighlight.withOpacity(0.95),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              ratioLabel,
+              style: tt.bodySmall?.copyWith(
+                color: atlas.textSecondary,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _ActionButton extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -1678,4 +1999,14 @@ String? _formatClock(DateTime? value) {
   final hour = value.hour.toString().padLeft(2, '0');
   final minute = value.minute.toString().padLeft(2, '0');
   return '$hour:$minute';
+}
+
+String _formatCo2Value(double value) {
+  if (value < 1) {
+    return '${(value * 1000).round()} g';
+  }
+  if (value >= 10) {
+    return '${value.toStringAsFixed(1)} kg';
+  }
+  return '${value.toStringAsFixed(2)} kg';
 }
