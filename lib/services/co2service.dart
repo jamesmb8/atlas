@@ -8,8 +8,8 @@ class Co2Service {
   double drivingKg(double distanceMeters) {
     final km = distanceMeters / 1000;
 
-    // TODO: replace with chosen England / UK government factor
-    const kgPerKm = 0.171;
+
+    const kgPerKm = 0.16272;
 
     return double.parse((km * kgPerKm).toStringAsFixed(2));
   }
@@ -17,8 +17,8 @@ class Co2Service {
   double publicTransportKg(double distanceMeters) {
     final km = distanceMeters / 1000;
 
-    // TODO: replace with chosen England / UK government factor
-    const kgPerKm = 0.041;
+
+    const kgPerKm = 0.0351;
 
     return double.parse((km * kgPerKm).toStringAsFixed(2));
   }

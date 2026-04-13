@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import '../../../app/screens/home_screen.dart';
 
 class SignUpEmailScreen extends StatefulWidget {
   final String firstName;
@@ -80,10 +81,9 @@ class _SignUpEmailScreenState extends State<SignUpEmailScreen> {
 
       if (!mounted) return;
 
-      // TODO: Navigate to your app shell (map screen) when ready.
-      // For now, just show success.
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Account created ✅')),
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const HomeScreen()),
+            (route) => false,
       );
 
       // Example placeholder:
