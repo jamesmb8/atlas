@@ -538,15 +538,25 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Future<ResolvedPlace?> _pickPlace() async {
+  // lib/app/screens/home_screen.dart
+
+  Future<ResolvedPlace?> _pickPlace({
+    String searchHint = 'Where to...',
+  }) async {
     return Navigator.push<ResolvedPlace>(
       context,
-      MaterialPageRoute(builder: (_) => const PlaceSearchScreen()),
+      MaterialPageRoute(
+        builder: (_) => PlaceSearchScreen(
+          searchHint: searchHint,
+        ),
+      ),
     );
   }
 
   Future<void> _openOriginPicker() async {
-    final result = await _pickPlace();
+    final result = await _pickPlace(
+      searchHint: 'Where from...',
+    );
     if (result == null) {
       return;
     }
@@ -560,7 +570,9 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _openPlacePicker() async {
-    final result = await _pickPlace();
+    final result = await _pickPlace(
+      searchHint: 'Where to...',
+    );
     if (result == null) {
       return;
     }

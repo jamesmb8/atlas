@@ -1,3 +1,5 @@
+// lib/features/search/place_search.dart
+
 import 'dart:async';
 
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
@@ -6,20 +8,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class PlaceSearchScreen extends StatefulWidget {
-  const PlaceSearchScreen({super.key});
+  final String searchHint;
+
+  const PlaceSearchScreen({
+    super.key,
+    this.searchHint = 'Where to...',
+  });
 
   @override
   State<PlaceSearchScreen> createState() => _PlaceSearchScreenState();
 }
 
 class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
-  final _controller = TextEditingController();
-  final _focusNode = FocusNode();
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
 
   Timer? _debounce;
   bool _loading = false;
 
-  List<_PlaceSuggestion> _suggestions = [];
+  List<_PlaceSuggestion> _suggestions = <_PlaceSuggestion>[];
 
   @override
   void initState() {
@@ -39,7 +46,7 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
   }
 
   void _onQueryChanged() {
-    final q = _controller.text.trim();
+    final String q = _controller.text.trim();
     _debounce?.cancel();
 
     _debounce = Timer(const Duration(milliseconds: 250), () async {
@@ -48,36 +55,48 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
       }
 
       if (q.isEmpty) {
-        setState(() => _suggestions = []);
+        setState(() {
+          _suggestions = <_PlaceSuggestion>[];
+        });
         return;
       }
 
-      setState(() => _loading = true);
+      setState(() {
+        _loading = true;
+      });
 
       try {
-        final results = await MapKitSearch.autocomplete(q);
+        final List<_PlaceSuggestion> results = await MapKitSearch.autocomplete(q);
         if (!mounted) {
           return;
         }
-        setState(() => _suggestions = results);
+        setState(() {
+          _suggestions = results;
+        });
       } catch (_) {
         if (!mounted) {
           return;
         }
-        setState(() => _suggestions = []);
+        setState(() {
+          _suggestions = <_PlaceSuggestion>[];
+        });
       } finally {
         if (mounted) {
-          setState(() => _loading = false);
+          setState(() {
+            _loading = false;
+          });
         }
       }
     });
   }
 
   Future<void> _selectSuggestion(_PlaceSuggestion s) async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+    });
 
     try {
-      final resolved = await MapKitSearch.resolve(s.title, s.subtitle);
+      final ResolvedPlace resolved = await MapKitSearch.resolve(s.title, s.subtitle);
       if (!mounted) {
         return;
       }
@@ -93,7 +112,9 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
       );
     } finally {
       if (mounted) {
-        setState(() => _loading = false);
+        setState(() {
+          _loading = false;
+        });
       }
     }
   }
@@ -101,7 +122,7 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
   @override
   Widget build(BuildContext context) {
     final atlas = context.atlas;
-    final tt = Theme.of(context).textTheme;
+    final TextTheme tt = Theme.of(context).textTheme;
 
     return Scaffold(
       backgroundColor: atlas.background,
@@ -125,7 +146,7 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
       body: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
         child: Column(
-          children: [
+          children: <Widget>[
             TextField(
               controller: _controller,
               focusNode: _focusNode,
@@ -135,7 +156,7 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
                 fontSize: 16,
               ),
               decoration: InputDecoration(
-                hintText: 'Where to?',
+                hintText: widget.searchHint,
                 hintStyle: tt.bodyMedium?.copyWith(
                   color: atlas.textSecondary.withOpacity(0.7),
                 ),
@@ -172,7 +193,7 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
                     : (_controller.text.isEmpty
                     ? null
                     : IconButton(
-                  onPressed: () => _controller.clear(),
+                  onPressed: _controller.clear,
                   icon: Icon(
                     Icons.close,
                     color: atlas.textSecondary,
@@ -187,8 +208,8 @@ class _PlaceSearchScreenState extends State<PlaceSearchScreen> {
                   : ListView.separated(
                 itemCount: _suggestions.length,
                 separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, i) {
-                  final s = _suggestions[i];
+                itemBuilder: (BuildContext context, int i) {
+                  final _PlaceSuggestion s = _suggestions[i];
                   return _SuggestionTile(
                     title: s.title,
                     subtitle: s.subtitle,
@@ -210,7 +231,7 @@ class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final atlas = context.atlas;
-    final tt = Theme.of(context).textTheme;
+    final TextTheme tt = Theme.of(context).textTheme;
 
     return Center(
       child: Text(
@@ -238,7 +259,7 @@ class _SuggestionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final atlas = context.atlas;
-    final tt = Theme.of(context).textTheme;
+    final TextTheme tt = Theme.of(context).textTheme;
 
     return Material(
       color: atlas.surface.withOpacity(0.5),
@@ -253,13 +274,13 @@ class _SuggestionTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
           ),
           child: Row(
-            children: [
+            children: <Widget>[
               Icon(Icons.place_outlined, color: atlas.textSecondary),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                  children: <Widget>[
                     Text(
                       title,
                       maxLines: 1,
@@ -321,15 +342,15 @@ class ResolvedPlace {
 }
 
 class MapKitSearch {
-  static const _channel = MethodChannel('atlas/mapkit_search');
+  static const MethodChannel _channel = MethodChannel('atlas/mapkit_search');
 
   static Future<List<_PlaceSuggestion>> autocomplete(String query) async {
-    final res = await _channel.invokeMethod<List<dynamic>>(
+    final List<dynamic>? res = await _channel.invokeMethod<List<dynamic>>(
       'autocomplete',
-      {'query': query},
+      <String, dynamic>{'query': query},
     );
 
-    return (res ?? const [])
+    return (res ?? const <dynamic>[])
         .cast<Map<dynamic, dynamic>>()
         .map(_PlaceSuggestion.fromMap)
         .where((s) => s.title.isNotEmpty)
@@ -337,17 +358,21 @@ class MapKitSearch {
   }
 
   static Future<ResolvedPlace> resolve(String title, String subtitle) async {
-    final res = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+    final Map<dynamic, dynamic>? res =
+    await _channel.invokeMethod<Map<dynamic, dynamic>>(
       'resolve',
-      {'title': title, 'subtitle': subtitle},
+      <String, dynamic>{
+        'title': title,
+        'subtitle': subtitle,
+      },
     );
 
     if (res == null) {
       throw Exception('resolve returned null');
     }
 
-    final lat = (res['lat'] as num).toDouble();
-    final lng = (res['lng'] as num).toDouble();
+    final double lat = (res['lat'] as num).toDouble();
+    final double lng = (res['lng'] as num).toDouble();
 
     return ResolvedPlace(
       title: (res['title'] as String?) ?? title,

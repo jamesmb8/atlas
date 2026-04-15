@@ -10,7 +10,7 @@ import 'package:atlas/services/transitrouteservice.dart';
 
 import 'routeoptionservice_test.dart';
 
-// Change this one line only if your working Apple route model uses a different name.
+
 typedef TestAppleRoute = AppleRouteResult;
 
 void main() {
