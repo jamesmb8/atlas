@@ -104,6 +104,10 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+// file: lib/app/screens/home_screen.dart
+//
+// Apply these replacements/additions.
+
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   static const String _favoritesStorageKey = 'atlas_saved_favorites_v1';
@@ -395,6 +399,7 @@ class _HomeScreenState extends State<HomeScreen>
               onAddFavoritePressed: _addCustomFavorite,
               onFavoritePressed: _selectFavorite,
               onFavoriteEditPressed: _editCustomFavoriteAddress,
+              onFavoriteDeletePressed: _confirmDeleteCustomFavorite,
             ),
           ),
         ],
@@ -538,8 +543,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // lib/app/screens/home_screen.dart
-
   Future<ResolvedPlace?> _pickPlace({
     String searchHint = 'Where to...',
   }) async {
@@ -671,7 +674,8 @@ class _HomeScreenState extends State<HomeScreen>
     required LatLng origin,
     required LatLng destination,
   }) {
-    final source = rawPoints.isNotEmpty ? rawPoints : <LatLng>[origin, destination];
+    final source =
+    rawPoints.isNotEmpty ? rawPoints : <LatLng>[origin, destination];
     final deduped = <LatLng>[];
 
     for (final point in source) {
@@ -745,7 +749,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     final polylines = <Polyline>{
       Polyline(
-        polylineId:  PolylineId('route_main'),
+        polylineId: PolylineId('route_main'),
         points: points,
         color: _routeBlue,
         width: 6,
@@ -756,7 +760,7 @@ class _HomeScreenState extends State<HomeScreen>
     if (includeGlow) {
       polylines.add(
         Polyline(
-          polylineId:  PolylineId('route_glow'),
+          polylineId: PolylineId('route_glow'),
           points: points,
           color: _routeBlueGlow,
           width: 12,
@@ -1110,6 +1114,63 @@ class _HomeScreenState extends State<HomeScreen>
     _showSnackBar('${favorite.name} updated.');
   }
 
+  Future<void> _confirmDeleteCustomFavorite(SavedFavorite favorite) async {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: atlas.background,
+          title: Text(
+            'Delete favourite?',
+            style: tt.titleLarge?.copyWith(color: atlas.textPrimary),
+          ),
+          content: Text(
+            'Remove ${favorite.name} from your saved favourites?',
+            style: tt.bodyMedium?.copyWith(color: atlas.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Cancel',
+                style: tt.labelLarge?.copyWith(color: atlas.textSecondary),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: atlas.brandPrimary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    await _deleteCustomFavorite(favorite);
+  }
+
+  Future<void> _deleteCustomFavorite(SavedFavorite favorite) async {
+    setState(() {
+      _customFavorites = _customFavorites
+          .where((item) => item.id != favorite.id)
+          .toList(growable: false);
+    });
+
+    await _persistFavorites();
+    _showSnackBar('${favorite.name} deleted.');
+  }
+
   bool _isReservedFavoriteName(String name) {
     final lower = name.trim().toLowerCase();
     return lower == 'home' || lower == 'work';
@@ -1205,6 +1266,345 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 }
+
+class _HomeBottomSheet extends StatelessWidget {
+  final String? selectedPlaceName;
+  final String departureLabel;
+  final bool hasScheduledDeparture;
+  final VoidCallback onDeparturePressed;
+  final VoidCallback onDepartureCleared;
+  final VoidCallback onFindPlace;
+  final VoidCallback? onGo;
+
+  final bool favoritesLoading;
+  final SavedFavorite? homeFavorite;
+  final SavedFavorite? workFavorite;
+  final List<SavedFavorite> customFavorites;
+  final VoidCallback onHomePressed;
+  final VoidCallback onWorkPressed;
+  final VoidCallback onSetHomePressed;
+  final VoidCallback onSetWorkPressed;
+  final VoidCallback onAddFavoritePressed;
+  final ValueChanged<SavedFavorite> onFavoritePressed;
+  final ValueChanged<SavedFavorite> onFavoriteEditPressed;
+  final ValueChanged<SavedFavorite> onFavoriteDeletePressed;
+
+  const _HomeBottomSheet({
+    required this.selectedPlaceName,
+    required this.departureLabel,
+    required this.hasScheduledDeparture,
+    required this.onDeparturePressed,
+    required this.onDepartureCleared,
+    required this.onFindPlace,
+    required this.onGo,
+    required this.favoritesLoading,
+    required this.homeFavorite,
+    required this.workFavorite,
+    required this.customFavorites,
+    required this.onHomePressed,
+    required this.onWorkPressed,
+    required this.onSetHomePressed,
+    required this.onSetWorkPressed,
+    required this.onAddFavoritePressed,
+    required this.onFavoritePressed,
+    required this.onFavoriteEditPressed,
+    required this.onFavoriteDeletePressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+    final hasSelection = selectedPlaceName != null;
+
+    return DraggableScrollableSheet(
+      expand: false,
+      snap: true,
+      initialChildSize: 0.34,
+      minChildSize: 0.20,
+      maxChildSize: 0.78,
+      snapSizes: const [0.34, 0.55, 0.78],
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: atlas.background,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+            boxShadow: const [
+              BoxShadow(
+                blurRadius: 24,
+                offset: Offset(0, -8),
+                color: Color(0x14000000),
+              ),
+            ],
+          ),
+          child: ListView(
+            controller: scrollController,
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: atlas.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                hasSelection ? 'Destination' : 'Plan a journey',
+                style: tt.titleLarge?.copyWith(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: atlas.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                hasSelection
+                    ? selectedPlaceName!
+                    : 'Choose a place to see the best options.',
+                style: tt.bodySmall?.copyWith(
+                  fontSize: 14,
+                  height: 1.25,
+                  color: atlas.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 14),
+              _FavouriteRow(
+                title: 'Departure',
+                subtitle: departureLabel,
+                leadingIcon: Icons.schedule_rounded,
+                onTap: onDeparturePressed,
+                trailingIcon: Icons.edit_outlined,
+                onTrailingPressed: onDeparturePressed,
+                secondaryTrailingIcon:
+                hasScheduledDeparture ? Icons.close_rounded : null,
+                onSecondaryTrailingPressed:
+                hasScheduledDeparture ? onDepartureCleared : null,
+              ),
+              const SizedBox(height: 16),
+              if (!hasSelection)
+                Row(
+                  children: [
+                    Expanded(
+                      child: _PrimaryButton(
+                        label: 'Find a place',
+                        onPressed: onFindPlace,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    SizedBox(
+                      width: 120,
+                      child: _PrimaryButton(
+                        label: 'Go',
+                        onPressed: onGo,
+                        isDisabledWhenNull: true,
+                      ),
+                    ),
+                  ],
+                )
+              else
+                _PrimaryButton(
+                  label: 'Go',
+                  onPressed: onGo,
+                  isDisabledWhenNull: true,
+                ),
+              const SizedBox(height: 14),
+              Divider(height: 1, color: atlas.border),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Favourite places',
+                      style: tt.labelMedium?.copyWith(
+                        fontSize: 13,
+                        color: atlas.textSecondary,
+                      ),
+                    ),
+                  ),
+                  _HeaderAddButton(onPressed: onAddFavoritePressed),
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (favoritesLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: Center(
+                    child: SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                )
+              else ...[
+                _FavouriteRow(
+                  title: 'Home',
+                  subtitle: homeFavorite?.addressLabel ?? 'Set address',
+                  leadingIcon: Icons.home_outlined,
+                  onTap: onHomePressed,
+                  trailingIcon: Icons.edit_location_alt_outlined,
+                  onTrailingPressed: onSetHomePressed,
+                ),
+                const SizedBox(height: 10),
+                _FavouriteRow(
+                  title: 'Work',
+                  subtitle: workFavorite?.addressLabel ?? 'Set address',
+                  leadingIcon: Icons.work_outline_rounded,
+                  onTap: onWorkPressed,
+                  trailingIcon: Icons.edit_location_alt_outlined,
+                  onTrailingPressed: onSetWorkPressed,
+                ),
+                if (customFavorites.isNotEmpty) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    'Saved favourites',
+                    style: tt.labelMedium?.copyWith(
+                      fontSize: 13,
+                      color: atlas.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ...List<Widget>.generate(customFavorites.length, (index) {
+                    final favorite = customFavorites[index];
+                    return Padding(
+                      padding: EdgeInsets.only(
+                        bottom: index == customFavorites.length - 1 ? 0 : 10,
+                      ),
+                      child: _FavouriteRow(
+                        title: favorite.name,
+                        subtitle: favorite.addressLabel,
+                        leadingIcon: Icons.star_border_rounded,
+                        onTap: () => onFavoritePressed(favorite),
+                        trailingIcon: Icons.edit_rounded,
+                        onTrailingPressed: () => onFavoriteEditPressed(favorite),
+                        secondaryTrailingIcon: Icons.delete_outline_rounded,
+                        onSecondaryTrailingPressed: () =>
+                            onFavoriteDeletePressed(favorite),
+                      ),
+                    );
+                  }),
+                ],
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _FavouriteRow extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final IconData leadingIcon;
+  final VoidCallback onTap;
+  final IconData? trailingIcon;
+  final VoidCallback? onTrailingPressed;
+  final IconData? secondaryTrailingIcon;
+  final VoidCallback? onSecondaryTrailingPressed;
+
+  const _FavouriteRow({
+    required this.title,
+    required this.subtitle,
+    required this.leadingIcon,
+    required this.onTap,
+    this.trailingIcon,
+    this.onTrailingPressed,
+    this.secondaryTrailingIcon,
+    this.onSecondaryTrailingPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+    final hasActions = (secondaryTrailingIcon != null &&
+        onSecondaryTrailingPressed != null) ||
+        (trailingIcon != null && onTrailingPressed != null);
+
+    return Material(
+      color: atlas.surface.withOpacity(0.45),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            border: Border.all(color: atlas.border),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              Icon(leadingIcon, color: atlas.textSecondary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: tt.titleMedium?.copyWith(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: atlas.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: tt.bodySmall?.copyWith(
+                        fontSize: 13,
+                        color: atlas.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (hasActions)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (secondaryTrailingIcon != null &&
+                        onSecondaryTrailingPressed != null)
+                      IconButton(
+                        onPressed: onSecondaryTrailingPressed,
+                        splashRadius: 18,
+                        icon: Icon(
+                          secondaryTrailingIcon,
+                          color: atlas.textSecondary,
+                        ),
+                      ),
+                    if (trailingIcon != null && onTrailingPressed != null)
+                      IconButton(
+                        onPressed: onTrailingPressed,
+                        splashRadius: 18,
+                        icon: Icon(
+                          trailingIcon,
+                          color: atlas.textSecondary,
+                        ),
+                      ),
+                  ],
+                )
+              else
+                Icon(
+                  Icons.chevron_right,
+                  color: atlas.textSecondary,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+// lib/app/screens/home_screen.dart
 
 class _SearchPill extends StatelessWidget {
   final String placeholder;
@@ -1314,231 +1714,6 @@ class _RoundIconButton extends StatelessWidget {
   }
 }
 
-class _HomeBottomSheet extends StatelessWidget {
-  final String? selectedPlaceName;
-  final String departureLabel;
-  final bool hasScheduledDeparture;
-  final VoidCallback onDeparturePressed;
-  final VoidCallback onDepartureCleared;
-  final VoidCallback onFindPlace;
-  final VoidCallback? onGo;
-
-  final bool favoritesLoading;
-  final SavedFavorite? homeFavorite;
-  final SavedFavorite? workFavorite;
-  final List<SavedFavorite> customFavorites;
-  final VoidCallback onHomePressed;
-  final VoidCallback onWorkPressed;
-  final VoidCallback onSetHomePressed;
-  final VoidCallback onSetWorkPressed;
-  final VoidCallback onAddFavoritePressed;
-  final ValueChanged<SavedFavorite> onFavoritePressed;
-  final ValueChanged<SavedFavorite> onFavoriteEditPressed;
-
-  const _HomeBottomSheet({
-    required this.selectedPlaceName,
-    required this.departureLabel,
-    required this.hasScheduledDeparture,
-    required this.onDeparturePressed,
-    required this.onDepartureCleared,
-    required this.onFindPlace,
-    required this.onGo,
-    required this.favoritesLoading,
-    required this.homeFavorite,
-    required this.workFavorite,
-    required this.customFavorites,
-    required this.onHomePressed,
-    required this.onWorkPressed,
-    required this.onSetHomePressed,
-    required this.onSetWorkPressed,
-    required this.onAddFavoritePressed,
-    required this.onFavoritePressed,
-    required this.onFavoriteEditPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final atlas = context.atlas;
-    final tt = Theme.of(context).textTheme;
-    final hasSelection = selectedPlaceName != null;
-
-    return DraggableScrollableSheet(
-      expand: false,
-      snap: true,
-      initialChildSize: 0.34,
-      minChildSize: 0.20,
-      maxChildSize: 0.78,
-      snapSizes: const [0.34, 0.55, 0.78],
-      builder: (context, scrollController) {
-        return Container(
-          decoration: BoxDecoration(
-            color: atlas.background,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-            boxShadow: const [
-              BoxShadow(
-                blurRadius: 24,
-                offset: Offset(0, -8),
-                color: Color(0x14000000),
-              ),
-            ],
-          ),
-          child: ListView(
-            controller: scrollController,
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-            children: [
-              Center(
-                child: Container(
-                  width: 42,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: atlas.border,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              Text(
-                hasSelection ? 'Destination' : 'Plan a journey',
-                style: tt.titleLarge?.copyWith(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w700,
-                  color: atlas.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                hasSelection
-                    ? selectedPlaceName!
-                    : 'Choose a place to see the best options.',
-                style: tt.bodySmall?.copyWith(
-                  fontSize: 14,
-                  height: 1.25,
-                  color: atlas.textSecondary,
-                ),
-              ),
-              const SizedBox(height: 14),
-              _FavouriteRow(
-                title: 'Departure',
-                subtitle: departureLabel,
-                leadingIcon: Icons.schedule_rounded,
-                onTap: onDeparturePressed,
-                trailingIcon: hasScheduledDeparture
-                    ? Icons.close_rounded
-                    : Icons.edit_outlined,
-                onTrailingPressed: hasScheduledDeparture
-                    ? onDepartureCleared
-                    : onDeparturePressed,
-              ),
-              const SizedBox(height: 16),
-              if (!hasSelection)
-                Row(
-                  children: [
-                    Expanded(
-                      child: _PrimaryButton(
-                        label: 'Find a place',
-                        onPressed: onFindPlace,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 120,
-                      child: _PrimaryButton(
-                        label: 'Go',
-                        onPressed: onGo,
-                        isDisabledWhenNull: true,
-                      ),
-                    ),
-                  ],
-                )
-              else
-                _PrimaryButton(
-                  label: 'Go',
-                  onPressed: onGo,
-                  isDisabledWhenNull: true,
-                ),
-              const SizedBox(height: 14),
-              Divider(height: 1, color: atlas.border),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Favourite places',
-                      style: tt.labelMedium?.copyWith(
-                        fontSize: 13,
-                        color: atlas.textSecondary,
-                      ),
-                    ),
-                  ),
-                  _HeaderAddButton(onPressed: onAddFavoritePressed),
-                ],
-              ),
-              const SizedBox(height: 10),
-              if (favoritesLoading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 20),
-                  child: Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
-                )
-              else ...[
-                _FavouriteRow(
-                  title: 'Home',
-                  subtitle: homeFavorite?.addressLabel ?? 'Set address',
-                  leadingIcon: Icons.home_outlined,
-                  onTap: onHomePressed,
-                  trailingIcon: Icons.edit_location_alt_outlined,
-                  onTrailingPressed: onSetHomePressed,
-                ),
-                const SizedBox(height: 10),
-                _FavouriteRow(
-                  title: 'Work',
-                  subtitle: workFavorite?.addressLabel ?? 'Set address',
-                  leadingIcon: Icons.work_outline_rounded,
-                  onTap: onWorkPressed,
-                  trailingIcon: Icons.edit_location_alt_outlined,
-                  onTrailingPressed: onSetWorkPressed,
-                ),
-                if (customFavorites.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  Text(
-                    'Saved favourites',
-                    style: tt.labelMedium?.copyWith(
-                      fontSize: 13,
-                      color: atlas.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  ...List<Widget>.generate(customFavorites.length, (index) {
-                    final favorite = customFavorites[index];
-                    return Padding(
-                      padding: EdgeInsets.only(
-                        bottom: index == customFavorites.length - 1 ? 0 : 10,
-                      ),
-                      child: _FavouriteRow(
-                        title: favorite.name,
-                        subtitle: favorite.addressLabel,
-                        leadingIcon: Icons.star_border_rounded,
-                        onTap: () => onFavoritePressed(favorite),
-                        trailingIcon: Icons.edit_rounded,
-                        onTrailingPressed: () => onFavoriteEditPressed(favorite),
-                      ),
-                    );
-                  }),
-                ],
-              ],
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
 class _PrimaryButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
@@ -1608,91 +1783,6 @@ class _HeaderAddButton extends StatelessWidget {
             Icons.add_rounded,
             size: 20,
             color: atlas.textPrimary,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FavouriteRow extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData leadingIcon;
-  final VoidCallback onTap;
-  final IconData? trailingIcon;
-  final VoidCallback? onTrailingPressed;
-
-  const _FavouriteRow({
-    required this.title,
-    required this.subtitle,
-    required this.leadingIcon,
-    required this.onTap,
-    this.trailingIcon,
-    this.onTrailingPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final atlas = context.atlas;
-    final tt = Theme.of(context).textTheme;
-
-    return Material(
-      color: atlas.surface.withOpacity(0.45),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            border: Border.all(color: atlas.border),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            children: [
-              Icon(leadingIcon, color: atlas.textSecondary),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: tt.titleMedium?.copyWith(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: atlas.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: tt.bodySmall?.copyWith(
-                        fontSize: 13,
-                        color: atlas.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              if (trailingIcon != null && onTrailingPressed != null)
-                IconButton(
-                  onPressed: onTrailingPressed,
-                  splashRadius: 18,
-                  icon: Icon(
-                    trailingIcon,
-                    color: atlas.textSecondary,
-                  ),
-                )
-              else
-                Icon(
-                  Icons.chevron_right,
-                  color: atlas.textSecondary,
-                ),
-            ],
           ),
         ),
       ),
