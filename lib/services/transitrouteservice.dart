@@ -522,6 +522,7 @@ class PublicTransportResult {
 class TransitRouteService {
   static const bool _debugLoggingEnabled = false;
 
+
   final TransportApi _transportApi;
 
   TransitRouteService({TransportApi? transportApi})
@@ -556,17 +557,24 @@ class TransitRouteService {
     Map<String, dynamic>? journeyData;
     String? debugReason;
 
+    final directDistanceMeters =
+    TransitPairResult._haversineMeters(origin, destination);
+
     try {
-      journeyData = await _transportApi.publicJourney(
-        fromLat: origin.latitude,
-        fromLon: origin.longitude,
-        toLat: destination.latitude,
-        toLon: destination.longitude,
-        dateTime: departureTime,
-        groupByRoute: false,
+      journeyData = await _fetchMergedJourneyData(
+        origin: origin,
+        destination: destination,
+        departureTime: departureTime,
       );
 
-      _debugDumpTransportApiRoutes(journeyData);
+      if (journeyData != null) {
+        _debugDumpTransportApiRoutes(journeyData);
+      } else {
+        debugReason = _appendDebugReason(
+          debugReason,
+          'silverrail + traveline returned no usable routes',
+        );
+      }
     } catch (e) {
       debugReason = 'public_journey failed: $e';
     }
@@ -579,11 +587,13 @@ class TransitRouteService {
       bus = _extractBestJourneyPlan(
         data: journeyData,
         targetMode: PublicTransportMode.bus,
+        directDistanceMeters: directDistanceMeters,
       );
 
       train = _extractBestJourneyPlan(
         data: journeyData,
         targetMode: PublicTransportMode.train,
+        directDistanceMeters: directDistanceMeters,
       );
 
       journeyOptions = _extractJourneyOptions(
@@ -601,7 +611,12 @@ class TransitRouteService {
       }
     }
 
-    var recommendedMode = _chooseRecommendedMode(bus, train);
+    var recommendedMode = _chooseRecommendedMode(
+      bus,
+      train,
+      directDistanceMeters: directDistanceMeters,
+    );
+
     if (recommendedMode == null && journeyOptions.isNotEmpty) {
       recommendedMode = journeyOptions.first.plan.mode;
     }
@@ -613,7 +628,9 @@ class TransitRouteService {
 
     final recommendedFare =
         _estimateFareForMode(recommendedMode, recommendedPair) ??
-            (journeyOptions.isNotEmpty ? journeyOptions.first.fareEstimate : null);
+            (journeyOptions.isNotEmpty
+                ? journeyOptions.first.fareEstimate
+                : null);
 
     final alternativeFare =
         _estimateFareForMode(
@@ -622,7 +639,9 @@ class TransitRouteService {
               : PublicTransportMode.train,
           alternativePair,
         ) ??
-            (journeyOptions.length > 1 ? journeyOptions[1].fareEstimate : null);
+            (journeyOptions.length > 1
+                ? journeyOptions[1].fareEstimate
+                : null);
 
     if (recommendedMode == null && journeyOptions.isEmpty) {
       debugReason = _appendDebugReason(
@@ -644,6 +663,80 @@ class TransitRouteService {
     );
   }
 
+  Future<Map<String, dynamic>?> _fetchMergedJourneyData({
+    required LatLng origin,
+    required LatLng destination,
+    DateTime? departureTime,
+  }) async {
+    final responses = <Map<String, dynamic>>[];
+
+    for (final service in const [
+      JourneyPlannerService.silverrail,
+      JourneyPlannerService.traveline,
+    ]) {
+      try {
+        final data = await _transportApi.publicJourney(
+          fromLat: origin.latitude,
+          fromLon: origin.longitude,
+          toLat: destination.latitude,
+          toLon: destination.longitude,
+          dateTime: departureTime,
+          service: service,
+          groupByRoute: false,
+        );
+
+        final rawRoutes = data['routes'] ?? data['journeys'];
+        if (rawRoutes is List && rawRoutes.isNotEmpty) {
+          responses.add({
+            ...data,
+            '__engine': service.apiValue,
+          });
+        } else if (_debugLoggingEnabled) {
+          print('Transit debug: ${service.apiValue} returned no routes');
+        }
+      } catch (e) {
+        if (_debugLoggingEnabled) {
+          print('Transit debug: ${service.apiValue} failed: $e');
+        }
+      }
+    }
+
+    if (responses.isEmpty) {
+      return null;
+    }
+
+    final mergedRoutes = <Map<String, dynamic>>[];
+
+    for (final response in responses) {
+      final engine = response['__engine']?.toString() ?? '';
+      final rawRoutes = response['routes'] ?? response['journeys'];
+
+      if (rawRoutes is! List) {
+        continue;
+      }
+
+      for (final rawRoute in rawRoutes) {
+        final route = _asMap(rawRoute);
+        if (route == null) {
+          continue;
+        }
+
+        mergedRoutes.add({
+          ...route,
+          '__engine': engine,
+        });
+      }
+    }
+
+    if (mergedRoutes.isEmpty) {
+      return null;
+    }
+
+    return {
+      'routes': mergedRoutes,
+    };
+  }
+
   String _appendDebugReason(String? current, String next) {
     if (current == null || current.trim().isEmpty) {
       return next;
@@ -663,6 +756,7 @@ class TransitRouteService {
 
     final directDistanceMeters =
     TransitPairResult._haversineMeters(origin, destination);
+
     final candidates = <TransitJourneyOption>[];
     final seenSignatures = <String>{};
 
@@ -704,8 +798,15 @@ class TransitRouteService {
   }
 
   int _compareJourneyOptions(TransitJourneyOption a, TransitJourneyOption b) {
+    final scoreCompare = a.score.compareTo(b.score);
+    if (scoreCompare != 0) {
+      return scoreCompare;
+    }
+
     final durationCompare =
-    a.plan.effectiveDurationMinutes.compareTo(b.plan.effectiveDurationMinutes);
+    a.plan.effectiveDurationMinutes.compareTo(
+      b.plan.effectiveDurationMinutes,
+    );
     if (durationCompare != 0) {
       return durationCompare;
     }
@@ -719,31 +820,18 @@ class TransitRouteService {
       }
     }
 
-    final aArrival = a.plan.arrivalTime;
-    final bArrival = b.plan.arrivalTime;
-    if (aArrival != null && bArrival != null) {
-      final arrivalCompare = aArrival.compareTo(bArrival);
-      if (arrivalCompare != 0) {
-        return arrivalCompare;
-      }
-    }
-
     final changesCompare =
     a.plan.interchangeCount.compareTo(b.plan.interchangeCount);
     if (changesCompare != 0) {
       return changesCompare;
     }
 
-    final carbonCompare =
-    a.plan.estimatedCo2Kg.compareTo(b.plan.estimatedCo2Kg);
-    if (carbonCompare != 0) {
-      return carbonCompare;
-    }
-
-    return a.score.compareTo(b.score);
+    return a.plan.estimatedCo2Kg.compareTo(b.plan.estimatedCo2Kg);
   }
 
-  List<TransitJourneyOption> _applyJourneyTags(List<TransitJourneyOption> options) {
+  List<TransitJourneyOption> _applyJourneyTags(
+      List<TransitJourneyOption> options,
+      ) {
     if (options.isEmpty) {
       return const [];
     }
@@ -766,8 +854,9 @@ class TransitRouteService {
         lowestCo2Index = i;
       }
 
-      final changesCompare = tagged[i].plan.interchangeCount
-          .compareTo(tagged[fewestChangesIndex].plan.interchangeCount);
+      final changesCompare = tagged[i].plan.interchangeCount.compareTo(
+        tagged[fewestChangesIndex].plan.interchangeCount,
+      );
 
       if (changesCompare < 0 ||
           (changesCompare == 0 &&
@@ -810,6 +899,7 @@ class TransitRouteService {
             (leg) => [
           leg.type.name,
           normalize(leg.routeCode),
+          normalize(leg.routeName),
           normalize(leg.fromStopName),
           normalize(leg.toStopName),
           (leg.distanceMeters / 100).round().toString(),
@@ -821,6 +911,7 @@ class TransitRouteService {
   TransitPairResult? _extractBestJourneyPlan({
     required Map<String, dynamic> data,
     required PublicTransportMode targetMode,
+    double? directDistanceMeters,
   }) {
     final rawRoutes = data['routes'] ?? data['journeys'];
     if (rawRoutes is! List) {
@@ -898,7 +989,11 @@ class TransitRouteService {
         isRealData: true,
       );
 
-      final score = _scoreJourneyPlan(plan);
+      final score = _scoreJourneyPlan(
+        plan,
+        directDistanceMeters: directDistanceMeters,
+      );
+
       if (best == null || bestScore == null || score < bestScore) {
         best = pair;
         bestScore = score;
@@ -936,11 +1031,12 @@ class TransitRouteService {
           : TransitLegType.bus);
 
       final distanceMeters = _readDistanceMeters(part) ?? 0.0;
-      final durationMinutes = _readDurationMinutes(part) ??
-          _estimateLegDurationMinutes(
-            type: parsedType,
-            distanceMeters: distanceMeters,
-          );
+      final durationMinutes =
+          _readDurationMinutes(part) ??
+              _estimateLegDurationMinutes(
+                type: parsedType,
+                distanceMeters: distanceMeters,
+              );
 
       if (_looksLikeWalk(modeText)) {
         legs.add(
@@ -1217,53 +1313,28 @@ class TransitRouteService {
       TransitJourneyPlan plan, {
         double? directDistanceMeters,
       }) {
-    var score = plan.effectiveDurationMinutes > 0
-        ? plan.effectiveDurationMinutes * 1000.0
-        : plan.totalDistanceMeters;
+    final duration = math.max(1, plan.effectiveDurationMinutes);
+    final directKm =
+    ((directDistanceMeters ?? plan.totalDistanceMeters) / 1000.0);
 
-    score += plan.interchangeCount * 9000;
-    score += plan.totalWalkingDistanceMeters * 3.0;
-    score += plan.estimatedCo2Kg * 1200.0;
-
-    if (plan.hasTrain) {
-      score += _railFeederPenalty(plan);
-    }
-
-    if (directDistanceMeters != null && directDistanceMeters > 60000) {
-      if (!plan.hasTrain) {
-        score += 30000;
-      }
-
-      if (plan.totalTransitDistanceMeters > 0) {
-        final ratio = plan.totalTransitDistanceMeters / directDistanceMeters;
-        if (ratio > 1.8) {
-          score += (ratio - 1.8) * 18000;
-        }
-      }
-    }
-
-    return score;
-  }
-
-  double _railFeederPenalty(TransitJourneyPlan plan) {
     final transitLegs =
     plan.legs.where((leg) => leg.isTransit).toList(growable: false);
+
     final firstTrainIndex =
     transitLegs.indexWhere((leg) => leg.type == TransitLegType.train);
-
-    if (firstTrainIndex == -1) {
-      return 0;
-    }
-
     final lastTrainIndex =
     transitLegs.lastIndexWhere((leg) => leg.type == TransitLegType.train);
 
-    final busesBefore = transitLegs
+    final busesBefore = firstTrainIndex <= 0
+        ? 0
+        : transitLegs
         .take(firstTrainIndex)
         .where((leg) => leg.type == TransitLegType.bus)
         .length;
 
-    final busesAfter = transitLegs
+    final busesAfter = lastTrainIndex == -1
+        ? 0
+        : transitLegs
         .skip(lastTrainIndex + 1)
         .where((leg) => leg.type == TransitLegType.bus)
         .length;
@@ -1271,25 +1342,53 @@ class TransitRouteService {
     final totalBusLegs =
         transitLegs.where((leg) => leg.type == TransitLegType.bus).length;
 
-    var penalty = 0.0;
+    final detourRatio =
+    (directDistanceMeters != null &&
+        directDistanceMeters > 0 &&
+        plan.totalTransitDistanceMeters > 0)
+        ? (plan.totalTransitDistanceMeters / directDistanceMeters)
+        : 1.0;
 
-    if (busesBefore > 1) {
-      penalty += (busesBefore - 1) * 12000;
-    }
-    if (busesAfter > 1) {
-      penalty += (busesAfter - 1) * 9000;
-    }
-    if (totalBusLegs > 2) {
-      penalty += (totalBusLegs - 2) * 7000;
+    var score = 0.0;
+
+    score += duration * 100.0;
+    score += plan.interchangeCount * 1400.0;
+    score += (plan.totalWalkingDistanceMeters / 1000.0) * 900.0;
+    score += plan.estimatedCo2Kg * 250.0;
+
+    if (detourRatio > 1.35) {
+      score += (detourRatio - 1.35) * 7000.0;
     }
 
-    return penalty;
+    if (plan.hasTrain) {
+      score += busesBefore * 2600.0;
+      score += busesAfter * 1600.0;
+
+      if (directKm <= 40 && busesBefore > 0) {
+        score += 5000.0;
+      }
+
+      if (directKm <= 25 && (busesBefore + busesAfter) > 0) {
+        score += 7000.0;
+      }
+
+      if (totalBusLegs > 1) {
+        score += (totalBusLegs - 1) * 2500.0;
+      }
+    } else {
+      if (directKm >= 45) {
+        score += 2500.0;
+      }
+    }
+
+    return score;
   }
 
   PublicTransportMode? _chooseRecommendedMode(
       TransitPairResult? bus,
-      TransitPairResult? train,
-      ) {
+      TransitPairResult? train, {
+        double? directDistanceMeters,
+      }) {
     final busOk = _isUsablePair(bus);
     final trainOk = _isUsablePair(train);
 
@@ -1303,8 +1402,16 @@ class TransitRouteService {
       return PublicTransportMode.train;
     }
 
-    final busScore = _scoreTransitPair(bus!, PublicTransportMode.bus);
-    final trainScore = _scoreTransitPair(train!, PublicTransportMode.train);
+    final busScore = _scoreTransitPair(
+      bus!,
+      PublicTransportMode.bus,
+      directDistanceMeters: directDistanceMeters,
+    );
+    final trainScore = _scoreTransitPair(
+      train!,
+      PublicTransportMode.train,
+      directDistanceMeters: directDistanceMeters,
+    );
 
     return trainScore < busScore
         ? PublicTransportMode.train
@@ -1351,10 +1458,17 @@ class TransitRouteService {
     return norm(a.name) == norm(b.name);
   }
 
-  double _scoreTransitPair(TransitPairResult pair, PublicTransportMode mode) {
+  double _scoreTransitPair(
+      TransitPairResult pair,
+      PublicTransportMode mode, {
+        double? directDistanceMeters,
+      }) {
     final journey = pair.journeyPlan;
     if (journey != null && journey.hasLegs) {
-      return _scoreJourneyPlan(journey);
+      return _scoreJourneyPlan(
+        journey,
+        directDistanceMeters: directDistanceMeters,
+      );
     }
 
     final access = pair.accessDistanceMeters ?? 999999;
@@ -1368,6 +1482,11 @@ class TransitRouteService {
       }
       if (access > 2500) {
         score += 1500;
+      }
+      if (directDistanceMeters != null &&
+          directDistanceMeters < 40000 &&
+          access > 1000) {
+        score += 3000;
       }
     } else {
       if (line >= 12000) {
@@ -1401,13 +1520,17 @@ class TransitRouteService {
 
   FareEstimate _estimateTrainFare(TransitPairResult pair) {
     final meters =
-        pair.journeyPlan?.totalTransitDistanceMeters ?? pair.lineDistanceMeters ?? 0;
+        pair.journeyPlan?.totalTransitDistanceMeters ??
+            pair.lineDistanceMeters ??
+            0;
     return _estimateTrainFareForMeters(meters);
   }
 
   FareEstimate _estimateBusFare(TransitPairResult pair) {
     final meters =
-        pair.journeyPlan?.totalTransitDistanceMeters ?? pair.lineDistanceMeters ?? 0;
+        pair.journeyPlan?.totalTransitDistanceMeters ??
+            pair.lineDistanceMeters ??
+            0;
     return _estimateBusFareForMeters(meters);
   }
 
@@ -1415,33 +1538,69 @@ class TransitRouteService {
     final km = meters / 1000.0;
 
     if (km <= 5) {
-      return const FareEstimate(min: 2.80, max: 6.50, label: 'Estimated train fare');
+      return const FareEstimate(
+        min: 2.80,
+        max: 6.50,
+        label: 'Estimated train fare',
+      );
     }
     if (km <= 20) {
-      return const FareEstimate(min: 5.20, max: 12.90, label: 'Estimated train fare');
+      return const FareEstimate(
+        min: 5.20,
+        max: 12.90,
+        label: 'Estimated train fare',
+      );
     }
     if (km <= 60) {
-      return const FareEstimate(min: 9.50, max: 24.50, label: 'Estimated train fare');
+      return const FareEstimate(
+        min: 9.50,
+        max: 24.50,
+        label: 'Estimated train fare',
+      );
     }
     if (km <= 120) {
-      return const FareEstimate(min: 16.00, max: 42.00, label: 'Estimated train fare');
+      return const FareEstimate(
+        min: 16.00,
+        max: 42.00,
+        label: 'Estimated train fare',
+      );
     }
-    return const FareEstimate(min: 24.00, max: 75.00, label: 'Estimated train fare');
+    return const FareEstimate(
+      min: 24.00,
+      max: 75.00,
+      label: 'Estimated train fare',
+    );
   }
 
   FareEstimate _estimateBusFareForMeters(double meters) {
     final km = meters / 1000.0;
 
     if (km <= 3) {
-      return const FareEstimate(min: 1.80, max: 2.50, label: 'Estimated bus fare');
+      return const FareEstimate(
+        min: 1.80,
+        max: 2.50,
+        label: 'Estimated bus fare',
+      );
     }
     if (km <= 8) {
-      return const FareEstimate(min: 2.00, max: 3.50, label: 'Estimated bus fare');
+      return const FareEstimate(
+        min: 2.00,
+        max: 3.50,
+        label: 'Estimated bus fare',
+      );
     }
     if (km <= 20) {
-      return const FareEstimate(min: 2.50, max: 5.50, label: 'Estimated bus fare');
+      return const FareEstimate(
+        min: 2.50,
+        max: 5.50,
+        label: 'Estimated bus fare',
+      );
     }
-    return const FareEstimate(min: 4.00, max: 8.50, label: 'Estimated bus fare');
+    return const FareEstimate(
+      min: 4.00,
+      max: 8.50,
+      label: 'Estimated bus fare',
+    );
   }
 
   String? _extractApiReason(Map<String, dynamic> data) {
@@ -1457,10 +1616,12 @@ class TransitRouteService {
     }
 
     final identification = _asMap(data['identification']);
-    final fromOptions =
-    identification == null ? null : _asMap(identification['from_options']);
-    final toOptions =
-    identification == null ? null : _asMap(identification['to_options']);
+    final fromOptions = identification == null
+        ? null
+        : _asMap(identification['from_options']);
+    final toOptions = identification == null
+        ? null
+        : _asMap(identification['to_options']);
 
     final fromError = fromOptions == null
         ? null
@@ -1542,7 +1703,8 @@ class TransitRouteService {
       final minutes = durationMap['minutes'] ?? durationMap['mins'];
       final seconds = durationMap['seconds'];
       final value = durationMap['value'];
-      final unit = _readFirstString(durationMap, const ['unit', 'units']).toLowerCase();
+      final unit = _readFirstString(durationMap, const ['unit', 'units'])
+          .toLowerCase();
 
       if (minutes != null) {
         final parsed = _parseDurationNumber(minutes, isSeconds: false);
@@ -1574,7 +1736,9 @@ class TransitRouteService {
       }
     }
 
-    final departure = _tryParseDateTime(item['departure_time'] ?? item['depart_at']);
+    final departure = _tryParseDateTime(
+      item['departure_time'] ?? item['depart_at'],
+    );
     final arrival = _tryParseDateTime(item['arrival_time'] ?? item['arrive_at']);
     if (departure != null && arrival != null && arrival.isAfter(departure)) {
       return arrival.difference(departure).inMinutes;
@@ -1886,16 +2050,22 @@ class TransitRouteService {
 
     print('Transit debug: raw route count=${rawRoutes.length}');
 
-    for (var i = 0; i < rawRoutes.length && i < 5; i++) {
+    for (var i = 0; i < rawRoutes.length && i < 8; i++) {
       final route = _asMap(rawRoutes[i]);
       if (route == null) {
         continue;
       }
 
-      print('Transit debug: route[$i]');
-      print('  departure=${route['departure_time'] ?? route['depart_at'] ?? route['departure']}');
-      print('  arrival=${route['arrival_time'] ?? route['arrive_at'] ?? route['arrival']}');
-      print('  duration=${route['duration'] ?? route['duration_minutes'] ?? route['total_duration']}');
+      print('Transit debug: route[$i] engine=${route['__engine']}');
+      print(
+        '  departure=${route['departure_time'] ?? route['depart_at'] ?? route['departure']}',
+      );
+      print(
+        '  arrival=${route['arrival_time'] ?? route['arrive_at'] ?? route['arrival']}',
+      );
+      print(
+        '  duration=${route['duration'] ?? route['duration_minutes'] ?? route['total_duration']}',
+      );
 
       final rawParts = route['route_parts'] ?? route['legs'];
       if (rawParts is! List) {
@@ -1932,7 +2102,7 @@ class TransitRouteService {
 
     print('Transit debug: parsed journey option count=${options.length}');
 
-    for (var i = 0; i < options.length && i < 5; i++) {
+    for (var i = 0; i < options.length && i < 8; i++) {
       final option = options[i];
       final plan = option.plan;
 
@@ -1940,6 +2110,7 @@ class TransitRouteService {
         'Transit debug: option[$i] '
             'mode=${option.modeLabel} '
             'tag=${option.tag} '
+            'score=${option.score.toStringAsFixed(2)} '
             'duration=${plan.effectiveDurationMinutes} '
             'changes=${plan.interchangeCount} '
             'headline=${plan.routeHeadline}',

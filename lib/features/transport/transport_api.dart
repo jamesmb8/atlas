@@ -5,6 +5,19 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
+enum JourneyPlannerService {
+  silverrail,
+  traveline,
+}
+
+extension JourneyPlannerServiceX on JourneyPlannerService {
+  String get apiValue => switch (this) {
+    JourneyPlannerService.silverrail => 'silverrail',
+    JourneyPlannerService.traveline => 'traveline',
+  };
+}
+
+
 class TransportApi {
   final String appId;
   final String appKey;
@@ -32,7 +45,7 @@ class TransportApi {
     required double toLat,
     required double toLon,
     DateTime? dateTime,
-    String service = 'traveline',
+    JourneyPlannerService service = JourneyPlannerService.silverrail,
     bool groupByRoute = false,
     bool showCallingPoints = false,
   }) async {
@@ -44,7 +57,7 @@ class TransportApi {
         'to': _toLonLat(toLon, toLat),
         'date': _formatDate(when),
         'time': _formatTime(when),
-        'service': service,
+        'service': service.apiValue,
         'group_by_route': groupByRoute.toString(),
         'show_calling_points': showCallingPoints.toString(),
         'app_id': appId,
