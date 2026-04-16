@@ -10,7 +10,7 @@ import 'package:atlas/features/themes/atlas_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:firebase_auth/firebase_auth.dart';
 import 'accountpage.dart';
 import '../../features/routes/directions.dart';
 import '../../features/search/place_search.dart';
@@ -104,9 +104,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-// file: lib/app/screens/home_screen.dart
-//
-// Apply these replacements/additions.
+
 
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
@@ -151,6 +149,7 @@ class _HomeScreenState extends State<HomeScreen>
     target: LatLng(53.3811, -1.4701),
     zoom: 12,
   );
+  String? get _currentUserEmail => FirebaseAuth.instance.currentUser?.email;
 
   static const List<String> _monthLabels = <String>[
     'Jan',
@@ -204,6 +203,7 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _loadSavedFavorites();
+
   }
 
   @override
@@ -212,12 +212,87 @@ class _HomeScreenState extends State<HomeScreen>
     super.dispose();
   }
 
-  void _openAccountPage() {
-    Navigator.push(
+  Future<void> _openAccountPage() async {
+    await Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const AccountPage()),
+      MaterialPageRoute(
+        builder: (_) => AccountPage(
+          userEmail: _currentUserEmail,
+          onChangePassword: _changePasswordWithFirebase,
+        ),
+      ),
     );
   }
+
+  Future<void> _confirmDeleteSystemFavorite(_SystemFavoriteSlot slot) async {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+    final isHome = slot == _SystemFavoriteSlot.home;
+    final label = isHome ? 'Home' : 'Work';
+    final favorite = isHome ? _homeFavorite : _workFavorite;
+
+    if (favorite == null) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: atlas.background,
+          title: Text(
+            'Delete $label?',
+            style: tt.titleLarge?.copyWith(color: atlas.textPrimary),
+          ),
+          content: Text(
+            'Remove the saved $label location?',
+            style: tt.bodyMedium?.copyWith(color: atlas.textSecondary),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: Text(
+                'Cancel',
+                style: tt.labelLarge?.copyWith(color: atlas.textSecondary),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: atlas.brandPrimary,
+                foregroundColor: Colors.white,
+                elevation: 0,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    await _deleteSystemFavorite(slot);
+  }
+
+  Future<void> _deleteSystemFavorite(_SystemFavoriteSlot slot) async {
+    final isHome = slot == _SystemFavoriteSlot.home;
+    final label = isHome ? 'Home' : 'Work';
+
+    setState(() {
+      if (isHome) {
+        _homeFavorite = null;
+      } else {
+        _workFavorite = null;
+      }
+    });
+
+    await _persistFavorites();
+    _showSnackBar('$label removed.');
+  }
+
 
   Future<AppleMapController?> _getController() async {
     if (_mapController != null) {
@@ -396,6 +471,12 @@ class _HomeScreenState extends State<HomeScreen>
               onWorkPressed: _handleWorkPressed,
               onSetHomePressed: () => _setSystemFavorite(_SystemFavoriteSlot.home),
               onSetWorkPressed: () => _setSystemFavorite(_SystemFavoriteSlot.work),
+              onHomeDeletePressed: _homeFavorite != null
+                  ? () => _confirmDeleteSystemFavorite(_SystemFavoriteSlot.home)
+                  : null,
+              onWorkDeletePressed: _workFavorite != null
+                  ? () => _confirmDeleteSystemFavorite(_SystemFavoriteSlot.work)
+                  : null,
               onAddFavoritePressed: _addCustomFavorite,
               onFavoritePressed: _selectFavorite,
               onFavoriteEditPressed: _editCustomFavoriteAddress,
@@ -462,6 +543,47 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() => _favoritesLoading = false);
     }
   }
+
+  Future<void> _changePasswordWithFirebase({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      throw Exception('You are not signed in.');
+    }
+
+    final email = user.email;
+    if (email == null || email.isEmpty) {
+      throw Exception('This account does not have an email address.');
+    }
+
+    try {
+      final credential = EmailAuthProvider.credential(
+        email: email,
+        password: currentPassword,
+      );
+
+      await user.reauthenticateWithCredential(credential);
+      await user.updatePassword(newPassword);
+    } on FirebaseAuthException catch (e) {
+      switch (e.code) {
+        case 'wrong-password':
+        case 'invalid-credential':
+          throw Exception('Your current password is incorrect.');
+        case 'weak-password':
+          throw Exception('Your new password is too weak.');
+        case 'requires-recent-login':
+          throw Exception('Please sign in again and try changing your password.');
+        case 'too-many-requests':
+          throw Exception('Too many attempts. Please try again later.');
+        default:
+          throw Exception(e.message ?? 'Could not update password.');
+      }
+    }
+  }
+
 
   SavedFavorite? _tryParseFavorite(dynamic raw) {
     if (raw is! Map) {
@@ -1265,6 +1387,8 @@ class _HomeScreenState extends State<HomeScreen>
       SnackBar(content: Text(message)),
     );
   }
+
+
 }
 
 class _HomeBottomSheet extends StatelessWidget {
@@ -1275,6 +1399,8 @@ class _HomeBottomSheet extends StatelessWidget {
   final VoidCallback onDepartureCleared;
   final VoidCallback onFindPlace;
   final VoidCallback? onGo;
+  final VoidCallback? onHomeDeletePressed;
+  final VoidCallback? onWorkDeletePressed;
 
   final bool favoritesLoading;
   final SavedFavorite? homeFavorite;
@@ -1305,6 +1431,8 @@ class _HomeBottomSheet extends StatelessWidget {
     required this.onWorkPressed,
     required this.onSetHomePressed,
     required this.onSetWorkPressed,
+    this.onHomeDeletePressed,
+    this.onWorkDeletePressed,
     required this.onAddFavoritePressed,
     required this.onFavoritePressed,
     required this.onFavoriteEditPressed,
@@ -1448,6 +1576,10 @@ class _HomeBottomSheet extends StatelessWidget {
                   onTap: onHomePressed,
                   trailingIcon: Icons.edit_location_alt_outlined,
                   onTrailingPressed: onSetHomePressed,
+        secondaryTrailingIcon:
+        homeFavorite != null ? Icons.delete_outline_rounded : null,
+        onSecondaryTrailingPressed: onHomeDeletePressed,
+
                 ),
                 const SizedBox(height: 10),
                 _FavouriteRow(
@@ -1457,6 +1589,10 @@ class _HomeBottomSheet extends StatelessWidget {
                   onTap: onWorkPressed,
                   trailingIcon: Icons.edit_location_alt_outlined,
                   onTrailingPressed: onSetWorkPressed,
+        secondaryTrailingIcon:
+        workFavorite != null ? Icons.delete_outline_rounded : null,
+        onSecondaryTrailingPressed: onWorkDeletePressed,
+
                 ),
                 if (customFavorites.isNotEmpty) ...[
                   const SizedBox(height: 14),

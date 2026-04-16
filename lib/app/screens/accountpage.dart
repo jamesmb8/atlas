@@ -3,141 +3,128 @@ import 'dart:convert';
 
 import 'package:atlas/features/themes/atlas_theme.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum DistanceUnit { kilometres, miles }
-
-class AccountSettings {
-  final bool notificationsEnabled;
-  final bool voiceGuidanceEnabled;
-  final bool avoidTolls;
-  final bool avoidMotorways;
-  final bool hapticsEnabled;
-  final bool autoOpenRouteOptions;
-  final DistanceUnit distanceUnit;
-
-  const AccountSettings({
-    this.notificationsEnabled = true,
-    this.voiceGuidanceEnabled = true,
-    this.avoidTolls = false,
-    this.avoidMotorways = false,
-    this.hapticsEnabled = true,
-    this.autoOpenRouteOptions = false,
-    this.distanceUnit = DistanceUnit.kilometres,
-  });
-
-  AccountSettings copyWith({
-    bool? notificationsEnabled,
-    bool? voiceGuidanceEnabled,
-    bool? avoidTolls,
-    bool? avoidMotorways,
-    bool? hapticsEnabled,
-    bool? autoOpenRouteOptions,
-    DistanceUnit? distanceUnit,
-  }) {
-    return AccountSettings(
-      notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
-      voiceGuidanceEnabled: voiceGuidanceEnabled ?? this.voiceGuidanceEnabled,
-      avoidTolls: avoidTolls ?? this.avoidTolls,
-      avoidMotorways: avoidMotorways ?? this.avoidMotorways,
-      hapticsEnabled: hapticsEnabled ?? this.hapticsEnabled,
-      autoOpenRouteOptions:
-      autoOpenRouteOptions ?? this.autoOpenRouteOptions,
-      distanceUnit: distanceUnit ?? this.distanceUnit,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return <String, dynamic>{
-      'notificationsEnabled': notificationsEnabled,
-      'voiceGuidanceEnabled': voiceGuidanceEnabled,
-      'avoidTolls': avoidTolls,
-      'avoidMotorways': avoidMotorways,
-      'hapticsEnabled': hapticsEnabled,
-      'autoOpenRouteOptions': autoOpenRouteOptions,
-      'distanceUnit':
-      distanceUnit == DistanceUnit.miles ? 'miles' : 'kilometres',
-    };
-  }
-
-  factory AccountSettings.fromJson(Map<String, dynamic> json) {
-    return AccountSettings(
-      notificationsEnabled:
-      (json['notificationsEnabled'] as bool?) ?? true,
-      voiceGuidanceEnabled:
-      (json['voiceGuidanceEnabled'] as bool?) ?? true,
-      avoidTolls: (json['avoidTolls'] as bool?) ?? false,
-      avoidMotorways: (json['avoidMotorways'] as bool?) ?? false,
-      hapticsEnabled: (json['hapticsEnabled'] as bool?) ?? true,
-      autoOpenRouteOptions:
-      (json['autoOpenRouteOptions'] as bool?) ?? false,
-      distanceUnit: (json['distanceUnit'] as String?) == 'miles'
-          ? DistanceUnit.miles
-          : DistanceUnit.kilometres,
-    );
-  }
-}
+typedef ChangePasswordHandler = Future<void> Function({
+required String currentPassword,
+required String newPassword,
+});
 
 class AccountPage extends StatefulWidget {
-  const AccountPage({super.key});
+  final String? userEmail;
+  final ChangePasswordHandler? onChangePassword;
+
+  const AccountPage({
+    super.key,
+    this.userEmail,
+    this.onChangePassword,
+  });
 
   @override
   State<AccountPage> createState() => _AccountPageState();
 }
 
-class _AccountPageState extends State<AccountPage> {
-  static const String _settingsStorageKey = 'atlas_account_settings_v1';
+class _AccountPageState extends State<AccountPage>
+    with WidgetsBindingObserver {
   static const String _favoritesStorageKey = 'atlas_saved_favorites_v1';
 
   final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
 
-  AccountSettings _settings = const AccountSettings();
+  final TextEditingController _currentPasswordController =
+  TextEditingController();
+  final TextEditingController _newPasswordController = TextEditingController();
+  final TextEditingController _confirmPasswordController =
+  TextEditingController();
+
   bool _loading = true;
+  bool _passwordBusy = false;
+  bool _locationBusy = false;
 
   int _savedPlacesCount = 0;
   bool _hasHome = false;
   bool _hasWork = false;
 
-  int get _activePreferencesCount {
-    final active = <bool>[
-      _settings.notificationsEnabled,
-      _settings.voiceGuidanceEnabled,
-      _settings.avoidTolls,
-      _settings.avoidMotorways,
-      _settings.hapticsEnabled,
-      _settings.autoOpenRouteOptions,
-    ];
+  bool _locationServicesEnabled = false;
+  LocationPermission _locationPermission = LocationPermission.denied;
 
-    return active.where((value) => value).length;
+  bool get _canChangePassword => widget.onChangePassword != null;
+
+  bool get _locationAllowed {
+    return _locationPermission == LocationPermission.always ||
+        _locationPermission == LocationPermission.whileInUse;
   }
 
-  String get _distanceLabel {
-    return _settings.distanceUnit == DistanceUnit.miles
-        ? 'Miles'
-        : 'Kilometres';
+  String get _locationStatusLabel {
+    if (!_locationServicesEnabled) {
+      return 'Off';
+    }
+
+    if (_locationAllowed) {
+      return 'Yes';
+    }
+
+    return 'No';
+  }
+
+  String get _locationSubtitle {
+    if (!_locationServicesEnabled) {
+      return 'Location services are off on this device. Open settings to turn them on.';
+    }
+
+    switch (_locationPermission) {
+      case LocationPermission.always:
+      case LocationPermission.whileInUse:
+        return 'Atlas can use your current location.';
+      case LocationPermission.deniedForever:
+        return 'Location access is blocked. Open settings to change it.';
+      case LocationPermission.denied:
+        return 'Atlas cannot use your current location. Open settings to allow it.';
+      case LocationPermission.unableToDetermine:
+        return 'Location access could not be determined.';
+    }
   }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadPage();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _currentPasswordController.dispose();
+    _newPasswordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadLocationStatus();
+    }
   }
 
   Future<void> _loadPage() async {
     try {
-      final settingsRaw = await _prefs.getString(_settingsStorageKey);
-      final favoritesRaw = await _prefs.getString(_favoritesStorageKey);
-
-      AccountSettings loadedSettings = const AccountSettings();
-
-      if (settingsRaw != null && settingsRaw.trim().isNotEmpty) {
-        final decoded = jsonDecode(settingsRaw);
-        if (decoded is Map) {
-          loadedSettings = AccountSettings.fromJson(
-            Map<String, dynamic>.from(decoded as Map),
-          );
-        }
+      await Future.wait([
+        _loadSavedPlacesSummary(),
+        _loadLocationStatus(),
+      ]);
+    } finally {
+      if (!mounted) {
+        return;
       }
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadSavedPlacesSummary() async {
+    try {
+      final favoritesRaw = await _prefs.getString(_favoritesStorageKey);
 
       bool hasHome = false;
       bool hasWork = false;
@@ -146,7 +133,7 @@ class _AccountPageState extends State<AccountPage> {
       if (favoritesRaw != null && favoritesRaw.trim().isNotEmpty) {
         final decoded = jsonDecode(favoritesRaw);
         if (decoded is Map) {
-          final data = Map<String, dynamic>.from(decoded as Map);
+          final data = Map<String, dynamic>.from(decoded);
           hasHome = data['home'] is Map;
           hasWork = data['work'] is Map;
 
@@ -162,91 +149,129 @@ class _AccountPageState extends State<AccountPage> {
       }
 
       setState(() {
-        _settings = loadedSettings;
         _hasHome = hasHome;
         _hasWork = hasWork;
         _savedPlacesCount =
             (_hasHome ? 1 : 0) + (_hasWork ? 1 : 0) + customCount;
-        _loading = false;
+      });
+    } catch (_) {
+      // Keep defaults.
+    }
+  }
+
+  Future<void> _loadLocationStatus() async {
+    try {
+      final servicesEnabled = await Geolocator.isLocationServiceEnabled();
+      final permission = await Geolocator.checkPermission();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _locationServicesEnabled = servicesEnabled;
+        _locationPermission = permission;
       });
     } catch (_) {
       if (!mounted) {
         return;
       }
 
-      setState(() => _loading = false);
+      setState(() {
+        _locationServicesEnabled = false;
+        _locationPermission = LocationPermission.denied;
+      });
     }
   }
 
-  Future<void> _updateSettings(AccountSettings updated) async {
-    setState(() => _settings = updated);
-    await _prefs.setString(
-      _settingsStorageKey,
-      jsonEncode(updated.toJson()),
-    );
-  }
-
-  Future<void> _resetSettings() async {
-    final atlas = context.atlas;
-    final tt = Theme.of(context).textTheme;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: atlas.background,
-          title: Text(
-            'Reset settings',
-            style: tt.titleLarge?.copyWith(
-              color: atlas.textPrimary,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          content: Text(
-            'This will restore all account and app settings to their defaults.',
-            style: tt.bodyMedium?.copyWith(
-              color: atlas.textSecondary,
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: Text(
-                'Cancel',
-                style: tt.labelLarge?.copyWith(
-                  color: atlas.textSecondary,
-                ),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Reset'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) {
+  Future<void> _openRelevantLocationSettings() async {
+    if (_locationBusy) {
       return;
     }
 
-    const defaults = AccountSettings();
-    await _prefs.setString(
-      _settingsStorageKey,
-      jsonEncode(defaults.toJson()),
-    );
+    setState(() => _locationBusy = true);
 
-    if (!mounted) {
+    try {
+      final opened = !_locationServicesEnabled
+          ? await Geolocator.openLocationSettings()
+          : await Geolocator.openAppSettings();
+
+      if (!opened) {
+        _showSnackBar('Could not open settings.');
+      }
+    } catch (_) {
+      _showSnackBar('Could not open settings.');
+    } finally {
+      if (mounted) {
+        setState(() => _locationBusy = false);
+      }
+    }
+  }
+
+  Future<void> _changePassword() async {
+    final handler = widget.onChangePassword;
+    if (handler == null || _passwordBusy) {
       return;
     }
 
-    setState(() => _settings = defaults);
-    _showSnackBar('Settings reset.');
+    final currentPassword = _currentPasswordController.text.trim();
+    final newPassword = _newPasswordController.text.trim();
+    final confirmPassword = _confirmPasswordController.text.trim();
+
+    if (currentPassword.isEmpty) {
+      _showSnackBar('Enter your current password.');
+      return;
+    }
+
+    if (newPassword.isEmpty) {
+      _showSnackBar('Enter a new password.');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      _showSnackBar('New password must be at least 6 characters.');
+      return;
+    }
+
+    if (newPassword == currentPassword) {
+      _showSnackBar('New password must be different.');
+      return;
+    }
+
+    if (newPassword != confirmPassword) {
+      _showSnackBar('New passwords do not match.');
+      return;
+    }
+
+    setState(() => _passwordBusy = true);
+
+    try {
+      await handler(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      );
+
+      _currentPasswordController.clear();
+      _newPasswordController.clear();
+      _confirmPasswordController.clear();
+
+      _showSnackBar('Password updated.');
+    } catch (error) {
+      _showSnackBar(_formatErrorMessage(error));
+    } finally {
+      if (mounted) {
+        setState(() => _passwordBusy = false);
+      }
+    }
   }
 
-  void _showComingSoon(String label) {
-    _showSnackBar('$label coming soon.');
+  String _formatErrorMessage(Object error) {
+    final cleaned = error
+        .toString()
+        .replaceFirst(RegExp(r'^Exception:\s*'), '')
+        .trim();
+
+    return cleaned.isEmpty ? 'Could not update password.' : cleaned;
   }
 
   void _showSnackBar(String message) {
@@ -273,213 +298,58 @@ class _AccountPageState extends State<AccountPage> {
             strokeWidth: 2,
           ),
         )
-            : CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        _IconSurfaceButton(
-                          icon: Icons.arrow_back_ios_new_rounded,
-                          onPressed: () => Navigator.of(context).pop(),
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: _AccountHeader(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    _AccountSummaryCard(
-                      savedPlacesCount: _savedPlacesCount,
-                      hasHome: _hasHome,
-                      hasWork: _hasWork,
-                      activePreferencesCount: _activePreferencesCount,
-                    ),
-                    const SizedBox(height: 18),
-                    const _SectionLabel('Navigation'),
-                    const SizedBox(height: 8),
-                    _SettingsCard(
-                      children: [
-                        _SwitchSettingTile(
-                          title: 'Voice guidance',
-                          subtitle: 'Read directions aloud while navigating.',
-                          value: _settings.voiceGuidanceEnabled,
-                          onChanged: (value) {
-                            _updateSettings(
-                              _settings.copyWith(
-                                voiceGuidanceEnabled: value,
-                              ),
-                            );
-                          },
-                        ),
-                        const _CardDivider(),
-                        _SwitchSettingTile(
-                          title: 'Open route options automatically',
-                          subtitle:
-                          'Jump straight to route choices after picking a destination.',
-                          value: _settings.autoOpenRouteOptions,
-                          onChanged: (value) {
-                            _updateSettings(
-                              _settings.copyWith(
-                                autoOpenRouteOptions: value,
-                              ),
-                            );
-                          },
-                        ),
-                        const _CardDivider(),
-                        _ChoiceSettingTile(
-                          title: 'Distance units',
-                          subtitle: 'Choose how distances are displayed.',
-                          currentValueLabel: _distanceLabel,
-                          firstLabel: 'km',
-                          secondLabel: 'mi',
-                          isFirstSelected:
-                          _settings.distanceUnit ==
-                              DistanceUnit.kilometres,
-                          onFirstPressed: () {
-                            _updateSettings(
-                              _settings.copyWith(
-                                distanceUnit: DistanceUnit.kilometres,
-                              ),
-                            );
-                          },
-                          onSecondPressed: () {
-                            _updateSettings(
-                              _settings.copyWith(
-                                distanceUnit: DistanceUnit.miles,
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    const _SectionLabel('Route preferences'),
-                    const SizedBox(height: 8),
-                    _SettingsCard(
-                      children: [
-                        _SwitchSettingTile(
-                          title: 'Avoid toll roads',
-                          subtitle:
-                          'Prefer routes without tolls when possible.',
-                          value: _settings.avoidTolls,
-                          onChanged: (value) {
-                            _updateSettings(
-                              _settings.copyWith(avoidTolls: value),
-                            );
-                          },
-                        ),
-                        const _CardDivider(),
-                        _SwitchSettingTile(
-                          title: 'Avoid motorways',
-                          subtitle:
-                          'Prefer local roads over faster major roads.',
-                          value: _settings.avoidMotorways,
-                          onChanged: (value) {
-                            _updateSettings(
-                              _settings.copyWith(
-                                avoidMotorways: value,
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    const _SectionLabel('App'),
-                    const SizedBox(height: 8),
-                    _SettingsCard(
-                      children: [
-                        _SwitchSettingTile(
-                          title: 'Notifications',
-                          subtitle:
-                          'Allow reminders and useful route updates.',
-                          value: _settings.notificationsEnabled,
-                          onChanged: (value) {
-                            _updateSettings(
-                              _settings.copyWith(
-                                notificationsEnabled: value,
-                              ),
-                            );
-                          },
-                        ),
-                        const _CardDivider(),
-                        _SwitchSettingTile(
-                          title: 'Haptic feedback',
-                          subtitle:
-                          'Use subtle vibration for key actions.',
-                          value: _settings.hapticsEnabled,
-                          onChanged: (value) {
-                            _updateSettings(
-                              _settings.copyWith(
-                                hapticsEnabled: value,
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    const _SectionLabel('Support & about'),
-                    const SizedBox(height: 8),
-                    _SettingsCard(
-                      children: [
-                        _ActionSettingTile(
-                          title: 'Saved places',
-                          subtitle:
-                          'You currently have $_savedPlacesCount saved place${_savedPlacesCount == 1 ? '' : 's'}.',
-                          trailingLabel: 'View',
-                          onTap: () => _showComingSoon('Saved places manager'),
-                        ),
-                        const _CardDivider(),
-                        _ActionSettingTile(
-                          title: 'Privacy',
-                          subtitle:
-                          'Control how Atlas handles your data.',
-                          trailingLabel: 'Open',
-                          onTap: () => _showComingSoon('Privacy settings'),
-                        ),
-                        const _CardDivider(),
-                        _ActionSettingTile(
-                          title: 'Help',
-                          subtitle:
-                          'Get support and learn how Atlas works.',
-                          trailingLabel: 'Open',
-                          onTap: () => _showComingSoon('Help centre'),
-                        ),
-                        const _CardDivider(),
-                        const _StaticInfoTile(
-                          title: 'App version',
-                          subtitle: 'Atlas preview build',
-                          trailingLabel: 'v1',
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    const _SectionLabel('Danger zone'),
-                    const SizedBox(height: 8),
-                    _SettingsCard(
-                      children: [
-                        _ActionSettingTile(
-                          title: 'Reset settings',
-                          subtitle:
-                          'Restore all account preferences to defaults.',
-                          trailingLabel: 'Reset',
-                          isDestructive: true,
-                          onTap: _resetSettings,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+            : SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _IconSurfaceButton(
+                    icon: Icons.arrow_back_ios_new_rounded,
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(child: _AccountHeader()),
+                ],
               ),
-            ),
-          ],
+              const SizedBox(height: 18),
+              _AccountOverviewCard(
+                email: widget.userEmail,
+                savedPlacesCount: _savedPlacesCount,
+                hasHome: _hasHome,
+                hasWork: _hasWork,
+              ),
+              if (_canChangePassword) ...[
+                const SizedBox(height: 18),
+                const _SectionLabel('Security'),
+                const SizedBox(height: 8),
+                _PasswordFormCard(
+                  currentPasswordController:
+                  _currentPasswordController,
+                  newPasswordController: _newPasswordController,
+                  confirmPasswordController:
+                  _confirmPasswordController,
+                  busy: _passwordBusy,
+                  onSubmit: _changePassword,
+                ),
+              ],
+              const SizedBox(height: 18),
+              const _SectionLabel('Device access'),
+              const SizedBox(height: 8),
+              _SettingsCard(
+                children: [
+                  _LocationAccessTile(
+                    title: 'Current location',
+                    subtitle: _locationSubtitle,
+                    status: _locationStatusLabel,
+                    busy: _locationBusy,
+                    onTap: _openRelevantLocationSettings,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -501,12 +371,12 @@ class _AccountHeader extends StatelessWidget {
           'Account',
           style: tt.headlineSmall?.copyWith(
             color: atlas.textPrimary,
-            height: 1.0,
+            height: 1,
           ),
         ),
         const SizedBox(height: 4),
         Text(
-          'Manage your app settings and route preferences.',
+          'Manage the parts of your account that are actually wired up.',
           style: tt.bodySmall?.copyWith(
             color: atlas.textSecondary,
           ),
@@ -516,17 +386,17 @@ class _AccountHeader extends StatelessWidget {
   }
 }
 
-class _AccountSummaryCard extends StatelessWidget {
+class _AccountOverviewCard extends StatelessWidget {
+  final String? email;
   final int savedPlacesCount;
   final bool hasHome;
   final bool hasWork;
-  final int activePreferencesCount;
 
-  const _AccountSummaryCard({
+  const _AccountOverviewCard({
+    required this.email,
     required this.savedPlacesCount,
     required this.hasHome,
     required this.hasWork,
-    required this.activePreferencesCount,
   });
 
   @override
@@ -565,7 +435,7 @@ class _AccountSummaryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Atlas account',
+                      'Signed in account',
                       style: tt.titleLarge?.copyWith(
                         color: atlas.textPrimary,
                         fontSize: 18,
@@ -573,8 +443,8 @@ class _AccountSummaryCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Personalise routes, app behaviour, and saved places.',
-                      style: tt.bodySmall?.copyWith(
+                      email ?? 'No email available',
+                      style: tt.bodyMedium?.copyWith(
                         color: atlas.textSecondary,
                       ),
                     ),
@@ -600,13 +470,151 @@ class _AccountSummaryCard extends StatelessWidget {
                 label: 'Work',
                 value: hasWork ? 'Set' : 'Empty',
               ),
-              _SummaryPill(
-                label: 'Active prefs',
-                value: activePreferencesCount.toString(),
-              ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PasswordFormCard extends StatelessWidget {
+  final TextEditingController currentPasswordController;
+  final TextEditingController newPasswordController;
+  final TextEditingController confirmPasswordController;
+  final bool busy;
+  final VoidCallback onSubmit;
+
+  const _PasswordFormCard({
+    required this.currentPasswordController,
+    required this.newPasswordController,
+    required this.confirmPasswordController,
+    required this.busy,
+    required this.onSubmit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: atlas.surface.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: atlas.border),
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _TileText(
+            title: 'Change password',
+            subtitle:
+            'Enter your current password and choose a new one.',
+          ),
+          const SizedBox(height: 14),
+          _PasswordField(
+            controller: currentPasswordController,
+            label: 'Current password',
+            textInputAction: TextInputAction.next,
+          ),
+          const SizedBox(height: 12),
+          _PasswordField(
+            controller: newPasswordController,
+            label: 'New password',
+            textInputAction: TextInputAction.next,
+          ),
+          const SizedBox(height: 12),
+          _PasswordField(
+            controller: confirmPasswordController,
+            label: 'Confirm new password',
+            textInputAction: TextInputAction.done,
+            onSubmitted: onSubmit,
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              onPressed: busy ? null : onSubmit,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: atlas.brandPrimary,
+                disabledBackgroundColor: atlas.border,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              child: busy
+                  ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+                  : Text(
+                'Update password',
+                style: tt.labelLarge?.copyWith(
+                  fontSize: 15,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PasswordField extends StatelessWidget {
+  final TextEditingController controller;
+  final String label;
+  final TextInputAction textInputAction;
+  final VoidCallback? onSubmitted;
+
+  const _PasswordField({
+    required this.controller,
+    required this.label,
+    required this.textInputAction,
+    this.onSubmitted,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final atlas = context.atlas;
+    final tt = Theme.of(context).textTheme;
+
+    return TextField(
+      controller: controller,
+      obscureText: true,
+      enableSuggestions: false,
+      autocorrect: false,
+      textInputAction: textInputAction,
+      onSubmitted: (_) => onSubmitted?.call(),
+      style: tt.bodyLarge?.copyWith(
+        color: atlas.textPrimary,
+      ),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: tt.bodyMedium?.copyWith(
+          color: atlas.textSecondary,
+        ),
+        filled: true,
+        fillColor: atlas.surface.withOpacity(0.9),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: atlas.border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: atlas.brandPrimary),
+        ),
       ),
     );
   }
@@ -652,134 +660,19 @@ class _SettingsCard extends StatelessWidget {
   }
 }
 
-class _CardDivider extends StatelessWidget {
-  const _CardDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    final atlas = context.atlas;
-
-    return Divider(
-      height: 1,
-      thickness: 1,
-      color: atlas.border,
-    );
-  }
-}
-
-class _SwitchSettingTile extends StatelessWidget {
+class _LocationAccessTile extends StatelessWidget {
   final String title;
   final String subtitle;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const _SwitchSettingTile({
-    required this.title,
-    required this.subtitle,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final atlas = context.atlas;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-      child: Row(
-        children: [
-          Expanded(
-            child: _TileText(
-              title: title,
-              subtitle: subtitle,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Switch.adaptive(
-            value: value,
-            activeColor: Colors.white,
-            activeTrackColor: atlas.brandPrimary,
-            inactiveThumbColor: atlas.surface,
-            inactiveTrackColor: atlas.border,
-            onChanged: onChanged,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ChoiceSettingTile extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final String currentValueLabel;
-  final String firstLabel;
-  final String secondLabel;
-  final bool isFirstSelected;
-  final VoidCallback onFirstPressed;
-  final VoidCallback onSecondPressed;
-
-  const _ChoiceSettingTile({
-    required this.title,
-    required this.subtitle,
-    required this.currentValueLabel,
-    required this.firstLabel,
-    required this.secondLabel,
-    required this.isFirstSelected,
-    required this.onFirstPressed,
-    required this.onSecondPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _TileText(
-            title: title,
-            subtitle: '$subtitle Currently: $currentValueLabel.',
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _OptionChipButton(
-                  label: firstLabel,
-                  selected: isFirstSelected,
-                  onPressed: onFirstPressed,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OptionChipButton(
-                  label: secondLabel,
-                  selected: !isFirstSelected,
-                  onPressed: onSecondPressed,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionSettingTile extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final String trailingLabel;
+  final String status;
+  final bool busy;
   final VoidCallback onTap;
-  final bool isDestructive;
 
-  const _ActionSettingTile({
+  const _LocationAccessTile({
     required this.title,
     required this.subtitle,
-    required this.trailingLabel,
+    required this.status,
+    required this.busy,
     required this.onTap,
-    this.isDestructive = false,
   });
 
   @override
@@ -787,14 +680,11 @@ class _ActionSettingTile extends StatelessWidget {
     final atlas = context.atlas;
     final tt = Theme.of(context).textTheme;
 
-    final titleColor = isDestructive ? atlas.danger : atlas.textPrimary;
-    final trailingColor = isDestructive ? atlas.danger : atlas.textSecondary;
-
     return Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
+        onTap: busy ? null : onTap,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
           child: Row(
@@ -803,60 +693,53 @@ class _ActionSettingTile extends StatelessWidget {
                 child: _TileText(
                   title: title,
                   subtitle: subtitle,
-                  titleColor: titleColor,
                 ),
               ),
               const SizedBox(width: 12),
-              Text(
-                trailingLabel,
-                style: tt.labelMedium?.copyWith(
-                  fontSize: 13,
-                  color: trailingColor,
+              if (busy)
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: atlas.brandPrimary,
+                  ),
+                )
+              else
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 7,
+                      ),
+                      decoration: BoxDecoration(
+                        color: atlas.surface.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: atlas.border),
+                      ),
+                      child: Text(
+                        status,
+                        style: tt.labelMedium?.copyWith(
+                          color: atlas.textPrimary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Manage',
+                      style: tt.labelMedium?.copyWith(
+                        fontSize: 13,
+                        color: atlas.textSecondary,
+                      ),
+                    ),
+                  ],
                 ),
-              ),
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _StaticInfoTile extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final String trailingLabel;
-
-  const _StaticInfoTile({
-    required this.title,
-    required this.subtitle,
-    required this.trailingLabel,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final atlas = context.atlas;
-    final tt = Theme.of(context).textTheme;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      child: Row(
-        children: [
-          Expanded(
-            child: _TileText(
-              title: title,
-              subtitle: subtitle,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            trailingLabel,
-            style: tt.labelMedium?.copyWith(
-              fontSize: 13,
-              color: atlas.textSecondary,
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -942,52 +825,6 @@ class _SummaryPill extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _OptionChipButton extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  const _OptionChipButton({
-    required this.label,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final atlas = context.atlas;
-    final tt = Theme.of(context).textTheme;
-
-    return Material(
-      color: selected
-          ? atlas.brandHighlight
-          : atlas.surface.withOpacity(0.8),
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onPressed,
-        child: Container(
-          height: 46,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: selected ? atlas.brandPrimary : atlas.border,
-            ),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            label,
-            style: tt.labelLarge?.copyWith(
-              fontSize: 15,
-              color: atlas.textPrimary,
-            ),
-          ),
-        ),
       ),
     );
   }
